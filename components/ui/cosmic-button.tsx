@@ -16,9 +16,11 @@ export function CosmicButton<E extends 'a' | 'button' = 'a'>({
 }: CosmicButtonProps<E>) {
   const Element = as ?? 'a';
   const isAnchor = Element === 'a';
+  const isFullWidth = Boolean(className?.includes('w-full'));
 
   const baseClassName = cn(
-    'group/cosmic relative inline-flex min-h-11 min-w-11 items-center justify-center gap-3 rounded-[15px] p-[3px] transition-transform',
+    'group/cosmic relative items-center justify-center gap-3 rounded-[15px] p-[3px] transition-transform',
+    isFullWidth ? 'flex w-full' : 'inline-flex min-h-11 min-w-11',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background',
     className
   );
@@ -33,8 +35,13 @@ export function CosmicButton<E extends 'a' | 'button' = 'a'>({
           }}
         />
       </span>
-      <span className="relative z-10 flex items-center gap-3 rounded-[12px] border border-white/10 bg-black/80 px-5 py-2.5 shadow-lg backdrop-blur-sm transition-all duration-300 active:scale-[0.98]">
-        <span className="font-heading text-base font-medium tracking-wide text-white">{children ?? 'Continue'}</span>
+      <span
+        className={cn(
+          'relative z-10 flex items-center justify-center gap-3 rounded-[12px] border border-white/10 bg-black/80 px-5 py-2.5 shadow-lg backdrop-blur-sm transition-all duration-300 active:scale-[0.98]',
+          isFullWidth && 'w-full px-4 py-2.5',
+        )}
+      >
+        <span className="font-heading text-sm font-medium tracking-wide text-white sm:text-base">{children ?? 'Continue'}</span>
       </span>
     </>
   );

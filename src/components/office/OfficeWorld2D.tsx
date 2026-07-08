@@ -38,8 +38,8 @@ const MOCK_AGENTS: WorldAgent[] = [
     name: 'ARKHE',
     role: 'Ethics Analyzer',
     status: 'working',
-    x: 200,
-    y: 150,
+    x: 180,
+    y: 120,
     ensName: 'arkhe.avril.eth',
     description: 'Evaluating ethical frameworks',
     isMock: true,
@@ -51,8 +51,8 @@ const MOCK_AGENTS: WorldAgent[] = [
     name: 'LUMEN',
     role: 'Clinical Context',
     status: 'idle',
-    x: 500,
-    y: 150,
+    x: 460,
+    y: 120,
     ensName: 'lumen.avril.eth',
     description: 'ACA methodology active',
     isMock: true,
@@ -64,8 +64,8 @@ const MOCK_AGENTS: WorldAgent[] = [
     name: 'FLUX',
     role: 'Treasury',
     status: 'working',
-    x: 350,
-    y: 320,
+    x: 320,
+    y: 250,
     ensName: 'flux.avril.eth',
     description: 'Processing payments',
     isMock: true,
@@ -76,8 +76,8 @@ const MOCK_AGENTS: WorldAgent[] = [
     name: 'VERA',
     role: 'Identity',
     status: 'idle',
-    x: 100,
-    y: 320,
+    x: 90,
+    y: 250,
     ensName: 'vera.avril.eth',
     description: 'Verifying credentials',
     isMock: true,
@@ -88,13 +88,16 @@ const MOCK_AGENTS: WorldAgent[] = [
     name: 'CIRQ',
     role: 'Infrastructure',
     status: 'error',
-    x: 600,
-    y: 320,
+    x: 550,
+    y: 250,
     ensName: 'cirq.avril.eth',
     description: 'Retrying connection',
     isMock: true,
   },
 ];
+
+const WORLD_WIDTH = 680;
+const WORLD_HEIGHT = 360;
 
 const STATUS_DOT_CLASS: Record<AgentStatus, string> = {
   idle: 'bg-emerald-400',
@@ -187,87 +190,94 @@ export default function OfficeWorld2D({
   }, [worldAgents, hasRealAgents]);
 
   return (
-    <GlassPanel className="p-3">
-      <div className="relative h-[620px] w-full overflow-auto rounded-xl border border-border/60 bg-[var(--avril-canvas)]">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(1200px_700px_at_50%_0%,oklch(0.62_0.14_210/0.10),transparent_55%),radial-gradient(800px_500px_at_100%_100%,oklch(0.62_0.14_210/0.06),transparent_50%)]" />
-        <div
-          className="pointer-events-none absolute inset-0 opacity-40"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, var(--avril-grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--avril-grid-line) 1px, transparent 1px)',
-            backgroundSize: '28px 28px',
-          }}
-        />
+    <GlassPanel className="p-2 sm:p-3">
+      <div className="relative w-full overflow-hidden rounded-xl border border-border/60 bg-[var(--avril-canvas)]">
+        <div className="relative mx-auto h-[210px] w-full sm:h-[280px] md:h-[420px] lg:h-[620px]">
+          <div
+            className="absolute left-1/2 top-1/2 origin-center -translate-x-1/2 -translate-y-1/2 scale-[0.46] sm:scale-[0.58] md:scale-[0.78] lg:scale-100"
+            style={{ width: WORLD_WIDTH, height: WORLD_HEIGHT }}
+          >
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(1200px_700px_at_50%_0%,oklch(0.62_0.14_210/0.10),transparent_55%),radial-gradient(800px_500px_at_100%_100%,oklch(0.62_0.14_210/0.06),transparent_50%)]" />
+            <div
+              className="pointer-events-none absolute inset-0 opacity-40"
+              style={{
+                backgroundImage:
+                  'linear-gradient(to right, var(--avril-grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--avril-grid-line) 1px, transparent 1px)',
+                backgroundSize: '28px 28px',
+              }}
+            />
 
-        <svg className="absolute inset-0 w-full h-full pointer-events-none">
-          {links.map((link) => {
-            const parent = byKey.get(link.parent);
-            const child = byKey.get(link.child);
-            if (!parent || !child) return null;
+            <svg className="pointer-events-none absolute inset-0 h-full w-full">
+              {links.map((link) => {
+                const parent = byKey.get(link.parent);
+                const child = byKey.get(link.child);
+                if (!parent || !child) return null;
 
-            return (
-              <line
-                key={`${link.parent}->${link.child}`}
-                x1={parent.x + 76}
-                y1={parent.y + 56}
-                x2={child.x + 76}
-                y2={child.y + 56}
-                stroke="rgba(0, 153, 175, 0.45)"
-                strokeWidth="1.5"
-                strokeDasharray={hasRealAgents ? undefined : '5 4'}
-              />
-            );
-          })}
-        </svg>
-
-        {worldAgents.map((agent) => {
-          const selected = selectedAgentKey === agent.agentKey;
-          const avatarGradient =
-            ROLE_AVATAR_CLASS[agent.role] || 'from-slate-500 to-slate-400';
-          const statusClass = STATUS_DOT_CLASS[agent.status];
-          const isWorking = agent.status === 'working';
-
-          return (
-            <button
-              key={agent.id}
-              type="button"
-              onClick={() => onSelectAgent(agent.agentKey)}
-              className={cn(
-                'absolute min-w-[152px] max-w-[190px] rounded-xl border border-border/70 bg-surface/70 p-3 text-left backdrop-blur-xl transition-all',
-                'shadow-[inset_0_1px_0_oklch(1_0_0/0.06),0_8px_24px_oklch(0_0_0/0.25)]',
-                selected ? 'ring-2 ring-brand' : 'hover:border-brand/40 hover:ring-1 hover:ring-brand/25'
-              )}
-              style={{ left: agent.x, top: agent.y }}
-            >
-              <div className="flex items-start gap-3">
-                <div className="relative">
-                  <div
-                    className={`h-11 w-11 rounded-full bg-gradient-to-br ${avatarGradient} text-white text-xs font-bold flex items-center justify-center shadow-lg`}
-                  >
-                    {initialsFromName(agent.name)}
-                  </div>
-                  <span
-                    className={`absolute -right-0.5 -bottom-0.5 inline-block h-3 w-3 rounded-full ring-2 ring-slate-950 ${statusClass} ${
-                      isWorking ? 'animate-pulse' : ''
-                    }`}
+                return (
+                  <line
+                    key={`${link.parent}->${link.child}`}
+                    x1={parent.x + 64}
+                    y1={parent.y + 44}
+                    x2={child.x + 64}
+                    y2={child.y + 44}
+                    stroke="rgba(0, 153, 175, 0.45)"
+                    strokeWidth="1.5"
+                    strokeDasharray={hasRealAgents ? undefined : '5 4'}
                   />
-                </div>
+                );
+              })}
+            </svg>
 
-                <div className="min-w-0">
-                  <p className="truncate font-heading text-sm font-semibold text-foreground">{agent.name}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{agent.role}</p>
-                  <p className="mt-0.5 truncate text-[10px] text-muted-foreground/80">
-                    {agent.ensName || `${agent.agentKey}.agent`}
+            {worldAgents.map((agent) => {
+              const selected = selectedAgentKey === agent.agentKey;
+              const avatarGradient =
+                ROLE_AVATAR_CLASS[agent.role] || 'from-slate-500 to-slate-400';
+              const statusClass = STATUS_DOT_CLASS[agent.status];
+              const isWorking = agent.status === 'working';
+
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => onSelectAgent(agent.agentKey)}
+                  className={cn(
+                    'absolute min-w-[128px] max-w-[150px] rounded-xl border border-border/70 bg-surface/70 p-2.5 text-left backdrop-blur-xl transition-all',
+                    'shadow-[inset_0_1px_0_oklch(1_0_0/0.06),0_8px_24px_oklch(0_0_0/0.25)]',
+                    selected ? 'ring-2 ring-brand' : 'hover:border-brand/40 hover:ring-1 hover:ring-brand/25'
+                  )}
+                  style={{ left: agent.x, top: agent.y }}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="relative shrink-0">
+                      <div
+                        className={`flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white shadow-lg ${avatarGradient}`}
+                      >
+                        {initialsFromName(agent.name)}
+                      </div>
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-slate-950 ${statusClass} ${
+                          isWorking ? 'animate-pulse' : ''
+                        }`}
+                      />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="truncate font-heading text-xs font-semibold text-foreground">{agent.name}</p>
+                      <p className="truncate text-[10px] text-muted-foreground">{agent.role}</p>
+                      <p className="mt-0.5 truncate text-[9px] text-muted-foreground/80">
+                        {agent.ensName || `${agent.agentKey}.agent`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="mt-1.5 truncate text-[9px] text-muted-foreground/90">
+                    {agent.description || 'Operational'}
                   </p>
-                </div>
-              </div>
-
-              <p className="mt-2 truncate text-[10px] text-muted-foreground/90">
-                {agent.description || 'Operational'}
-              </p>
-            </button>
-          );
-        })}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </GlassPanel>
   );

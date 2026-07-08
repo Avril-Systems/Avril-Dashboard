@@ -126,20 +126,21 @@ export function CompanyCreating({ companyName, onComplete, durationMs = 5200 }: 
         <p className="text-sm font-medium text-brand">{companyName}</p>
       </div>
 
-      <div className="relative w-full overflow-hidden rounded-2xl border border-border/70 bg-surface/40 p-4 backdrop-blur-sm md:p-6">
-        <div className="mx-auto flex origin-center scale-[0.72] justify-center sm:scale-90 md:scale-100">
-          <CircuitBoard
-            nodes={nodes}
-            connections={connections}
-            width={540}
-            height={280}
-            pulseSpeed={1.6}
-            traceColor="rgba(0, 153, 175, 0.22)"
-            pulseColor={avrilColors.brandGlow}
-            gridColor="rgba(0, 153, 175, 0.08)"
-            variant="dark"
-            className="max-w-full"
-          />
+      <div className="relative w-full overflow-hidden rounded-2xl border border-border/70 bg-surface/40 p-3 backdrop-blur-sm sm:p-4 md:p-6">
+        <div className="mx-auto flex w-full justify-center overflow-hidden">
+          <div className="origin-center scale-[0.48] sm:scale-[0.62] md:scale-[0.82] lg:scale-100">
+            <CircuitBoard
+              nodes={nodes}
+              connections={connections}
+              width={540}
+              height={280}
+              pulseSpeed={1.6}
+              traceColor="rgba(0, 153, 175, 0.22)"
+              pulseColor={avrilColors.brandGlow}
+              gridColor="rgba(0, 153, 175, 0.08)"
+              variant="dark"
+            />
+          </div>
         </div>
       </div>
 

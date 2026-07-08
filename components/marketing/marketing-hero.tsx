@@ -42,7 +42,7 @@ export function MarketingHero() {
         showCta
         renderCta={() => (
           <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
-              <MarketingBrandButton label={h.ctaSecondary} href="/start/idea" motion="calm" />
+            <MarketingBrandButton label={h.ctaSecondary} href="/start/idea" motion="calm" />
             <CosmicButton href="/get-started">{h.ctaPrimary}</CosmicButton>
           </div>
         )}
@@ -65,7 +65,12 @@ export function MarketingHero() {
               descriptionClassName="text-pretty leading-relaxed"
             />
 
-            <HeroHeatmapActions />
+            <HeroHeatmapMobileVisual
+              placement="inline"
+              mobileShaderProps={{ scale: 0.62, innerGlow: 0.5, outerGlow: 0.4 }}
+            />
+
+            <HeroHeatmapActions className="relative z-20" />
 
             <div
               className="hidden justify-center lg:flex lg:justify-start"
@@ -77,8 +82,6 @@ export function MarketingHero() {
 
           <HeroHeatmapVisual desktopClassName="rounded-full" className="xl:h-[520px]" />
         </HeroHeatmapContainer>
-
-        <HeroHeatmapMobileVisual />
       </HeroHeatmapRoot>
     </SectionBackdrop>
   );

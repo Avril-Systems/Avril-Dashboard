@@ -104,6 +104,8 @@ export interface HeroHeatmapVisualProps extends React.ComponentPropsWithoutRef<'
 
 export interface HeroHeatmapMobileVisualProps extends React.ComponentPropsWithoutRef<'div'> {
   mobileShaderProps?: Partial<HeatmapProps>;
+  /** `background` bleeds behind CTAs; `inline` sits in the content flow between copy and buttons */
+  placement?: 'background' | 'inline';
 }
 
 interface HeroHeatmapContextValue {
@@ -589,6 +591,7 @@ export function HeroHeatmapVisual({
 export function HeroHeatmapMobileVisual({
   className,
   mobileShaderProps,
+  placement = 'background',
   ...props
 }: HeroHeatmapMobileVisualProps) {
   const context = useHeroHeatmapContext();
@@ -605,16 +608,23 @@ export function HeroHeatmapMobileVisual({
     pointerOffsets,
   );
 
+  const isInline = placement === 'inline';
+
   return (
     <div
       className={cn(
-        'pointer-events-none absolute inset-x-0 -bottom-24 -z-10 h-[360px] overflow-hidden lg:hidden',
+        'pointer-events-none lg:hidden',
+        isInline
+          ? 'relative z-10 mx-auto my-1 h-[min(200px,48vw)] w-[min(240px,62vw)] overflow-hidden rounded-full'
+          : 'absolute inset-x-0 -bottom-24 -z-10 h-[360px] overflow-hidden',
         className,
       )}
       data-slot="hero-heatmap-mobile"
       {...props}
     >
-      <div className="absolute inset-x-0 top-0 z-10 h-56 bg-gradient-to-b from-[var(--avril-canvas)] via-[var(--avril-canvas)]/95 to-transparent" />
+      {!isInline ? (
+        <div className="absolute inset-x-0 top-0 z-10 h-56 bg-gradient-to-b from-[var(--avril-canvas)] via-[var(--avril-canvas)]/95 to-transparent" />
+      ) : null}
       <MemoizedHeatmap
         {...resolvedMobileShaderProps}
         image={resolvedMobileShaderProps.image ?? (defaultMobileShaderProps.image as string)}

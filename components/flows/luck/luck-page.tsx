@@ -82,6 +82,7 @@ export function LuckPage() {
               as="button"
               type="button"
               onClick={startOpportunityFlow}
+              className="w-full max-w-xs sm:w-auto"
             >
               {o.cta}
             </CosmicButton>

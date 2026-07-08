@@ -105,14 +105,14 @@ export function OpportunityCard({ opportunity, index, onSelect }: OpportunityCar
         </div>
       </div>
 
-      <div className="flex justify-center border-t border-border/50 bg-surface/40 px-6 py-5">
+      <div className="flex justify-center border-t border-border/50 bg-surface/40 px-4 py-4 sm:px-6 sm:py-5">
         <CosmicButton
           as="button"
           type="button"
           onClick={() => onSelect(opportunity)}
-          className="w-full sm:w-auto"
+          className="w-full max-w-none sm:max-w-xs"
         >
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center justify-center gap-2">
             <Target size={14} />
             {c.choose}
           </span>
