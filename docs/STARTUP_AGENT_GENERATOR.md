@@ -71,6 +71,23 @@ Use `/startup-agent-generator` for interactive generation:
 4. Submit generation.
 5. Review role matrix and artifact path.
 
+## Dashboard visualization layer
+
+The same generated artifact powers an "agentic wallet communication layer" panel embedded in:
+
+- `/home`
+- `/agents`
+- `/chats`
+- `/wallets`
+- `/profile`
+- `/startup-agent-generator`
+
+The panel consumes:
+
+- `GET /api/startup-agent-generator/latest`
+
+and renders role matrix + execute/revoke posture to keep onchain identity and wallet communication state visible across operations.
+
 ## Acceptance checklist
 
 - [ ] At least 3 roles generated in one run

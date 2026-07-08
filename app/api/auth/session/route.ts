@@ -63,7 +63,16 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  return NextResponse.json({ ok: !!readSession(req) });
+  const session = readSession(req);
+  if (!session) {
+    return NextResponse.json({ ok: false });
+  }
+  return NextResponse.json({
+    ok: true,
+    address: session.address,
+    plan: session.plan ?? null,
+    luckIdeaId: session.luckIdeaId ?? null,
+  });
 }
 
 export async function DELETE() {

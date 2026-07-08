@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import NavDrawer from './Sidebar';
 import Topbar from './Topbar';
 import { useWaaP } from './WaaPProvider';
@@ -9,15 +8,6 @@ import { useWaaP } from './WaaPProvider';
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { isReady, isAuthenticated, login, address } = useWaaP();
-  const router = useRouter();
-  const hasRedirectedRef = useRef(false);
-
-  useEffect(() => {
-    if (isAuthenticated && !hasRedirectedRef.current) {
-      hasRedirectedRef.current = true;
-      router.replace('/home');
-    }
-  }, [isAuthenticated, router]);
 
   if (!isReady) {
     return <main className="min-h-screen grid place-items-center text-sm text-muted font-sans">Initializing WaaP…</main>;

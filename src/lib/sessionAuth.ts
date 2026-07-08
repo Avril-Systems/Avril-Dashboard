@@ -3,10 +3,12 @@ import crypto from 'crypto';
 const NONCE_COOKIE = 'ad_nonce';
 const SESSION_COOKIE = 'ad_session';
 
-type SessionPayload = {
+export type SessionPayload = {
   address: string;
   human: boolean;
   exp: number;
+  plan?: string;
+  luckIdeaId?: string;
 };
 
 function b64url(input: string) {
@@ -58,11 +60,16 @@ export function clearNonceCookie() {
   return `${NONCE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
-export function createSessionToken(address: string, options?: { human?: boolean }) {
+export function createSessionToken(
+  address: string,
+  options?: { human?: boolean; plan?: string; luckIdeaId?: string; exp?: number }
+) {
   const payload: SessionPayload = {
     address: address.toLowerCase(),
     human: options?.human === true,
-    exp: Date.now() + 1000 * 60 * 60 * 12,
+    exp: options?.exp ?? Date.now() + 1000 * 60 * 60 * 12,
+    ...(options?.plan ? { plan: options.plan } : {}),
+    ...(options?.luckIdeaId ? { luckIdeaId: options.luckIdeaId } : {}),
   };
   const body = b64url(JSON.stringify(payload));
   const sig = sign(body);
@@ -102,6 +109,15 @@ export function readSession(req: Request): SessionPayload | null {
   } catch {
     return null;
   }
+}
+
+export function refreshSessionToken(session: SessionPayload, patch: Partial<Pick<SessionPayload, 'plan' | 'luckIdeaId' | 'human'>>) {
+  return createSessionToken(session.address, {
+    human: patch.human ?? session.human,
+    plan: patch.plan ?? session.plan,
+    luckIdeaId: patch.luckIdeaId ?? session.luckIdeaId,
+    exp: session.exp,
+  });
 }
 
 export function requireSession(req: Request) {

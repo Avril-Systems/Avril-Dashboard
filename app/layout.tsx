@@ -1,26 +1,24 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import Shell from '@/src/components/Shell';
 import ConvexClientProvider from '@/src/components/ConvexClientProvider';
 import WaaPProvider from '@/src/components/WaaPProvider';
 import { UIStoreProvider } from '@/src/lib/store';
 import ThemeProvider from '@/src/components/ThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'Avril Dashboard',
-  description: 'Control plane for Avril multi-agent operations',
+  title: 'Avril — Vibe Founding OS',
+  description:
+    'Turn market signals into operable agentic companies. Generate, launch, and supervise with Avril.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className="dark">
       <body>
         <WaaPProvider>
           <UIStoreProvider>
             <ThemeProvider>
-              <ConvexClientProvider>
-                <Shell>{children}</Shell>
-              </ConvexClientProvider>
+              <ConvexClientProvider>{children}</ConvexClientProvider>
             </ThemeProvider>
           </UIStoreProvider>
         </WaaPProvider>

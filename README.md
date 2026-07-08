@@ -28,6 +28,12 @@ This README summarizes what we shipped for the hackathon and lists **verifiable 
 - **Human.tech** auth boundary and **WaaP** for wallet flows (e.g. Celo switch + ERC-8004 registration).
 - **Optional Human Passport** verification via `verifyHumanTechSession()` ([`src/lib/humantech.ts`](src/lib/humantech.ts)) when Passport env vars are set.
 - **Rich chat UI** (animated architect experience, plan/brief affordances) aligned with the product demo path.
+- **Agentic wallet communication layer panel** shared across `Home`, `Agents`, `Chats`, `Wallets`, `Profile`, and `Startup Agent Generator` pages, showing:
+  - Root wallet authority
+  - Role delegates + Prism contexts
+  - ENS assignments
+  - ERC-8004 status
+  - Execute/revoke health signals from startup artifacts
 
 ### Docs for judges / operators
 
@@ -157,11 +163,33 @@ Interactive UI:
 
 - `/startup-agent-generator`
 
+APIs:
+
+- `POST /api/startup-agent-generator` (run generator with startup + role policy input)
+- `GET /api/startup-agent-generator/latest` (read latest `agent/startup_swarm_*.json` for dashboard visualization)
+
+Generator internals:
+
+- Script engine: `script/startup-agent-generator.mjs`
+- Shell wrapper: `scripts/startup-agent-generator.sh`
+- Reusable defaults/types: `src/lib/startupAgentGenerator.ts`
+- Shared dashboard panel: `src/components/AgenticWalletLayerPanel.tsx`
+
 ### Safety constraints
 
 - Never commit private keys.
 - Keys are written only to `~/.config/prism/keys` (or `PRISM_KEYS_DIR`).
 - Every generated context includes explicit revoke instructions.
+
+### Reproducible commands
+
+```bash
+# direct node entrypoint
+npm run startup-agent:generate -- "acme-robotics" '[{"role":"ceo-agent","policy":{"spendingLimit":"10000000000000000","dailyLimit":"30000000000000000","ttl":172800,"allowlist":[]}}]'
+
+# shell wrapper
+./scripts/startup-agent-generator.sh "acme-robotics" '[{"role":"ceo-agent","policy":{"spendingLimit":"10000000000000000","dailyLimit":"30000000000000000","ttl":172800,"allowlist":[]}}]'
+```
 
 ---
 
