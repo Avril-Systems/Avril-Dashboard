@@ -39,6 +39,8 @@
   /* Avril marketing */
   --avril-brand: #0099af;
   --avril-brand-dim: #007a8c;
+  --avril-brand-subtle: color-mix(in srgb, var(--avril-brand) 55%, transparent);
+  --avril-brand-glow: rgba(0, 153, 175, 0.6);
   --avril-accent-lime: #adfa1e;
   --avril-canvas: #0a0a0a;
   --avril-grid-line: oklch(0.22 0 0 / 0.4);
@@ -494,4 +496,40 @@ a:focus-visible {
 
 @utility animate-cosmic-spin-slow {
   animation: cosmic-spin-slow 5s linear infinite;
+}
+
+@utility font-heading {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+/* ========== Avril marketing typography (Jura) ========== */
+.avril-marketing {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.avril-marketing :where(h1, h2, h3, h4) {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+.avril-marketing :where(h1) {
+  font-weight: 500;
+}
+
+.avril-marketing :where(h2, h3, h4) {
+  font-weight: 600;
+}
+
+.avril-marketing .avril-wordmark {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.avril-marketing .avril-stat-value {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }

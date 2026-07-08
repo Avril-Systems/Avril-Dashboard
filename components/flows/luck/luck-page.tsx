@@ -2,36 +2,40 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
-import { CosmicButton } from '@/components/ui/cosmic-button';
+import { FlowShell } from '@/components/flows/shared/flow-shell';
+import { useLanguage } from '@/components/marketing/language-context';
 import { Eyebrow } from '@/components/patterns/eyebrow';
-import { SectionBackdrop } from '@/components/patterns/section-backdrop';
+import { CosmicButton } from '@/components/ui/cosmic-button';
 import { BlueprintPreview } from './blueprint-preview';
 import { LoadingState } from './loading-state';
-import { LOADING_MESSAGES, MOCK_OPPORTUNITIES } from './mock-data';
+import { getMockOpportunities } from './mock-data';
 import { OpportunityCard } from './opportunity-card';
 import { DeployGate } from './deploy-gate';
-import type { LuckStep, Opportunity } from './types';
+import { FlowDashboard } from '@/components/flows/shared/flow-dashboard';
+import { CompanyCreating } from '@/components/flows/shared/company-creating';
+import type { FlowStep, Opportunity } from './types';
 
 export function LuckPage() {
-  const [step, setStep] = useState<LuckStep>('hero');
+  const { t, language } = useLanguage();
+  const o = t.flow.opportunity;
+  const [step, setStep] = useState<FlowStep>('hero');
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
-  const [deployed, setDeployed] = useState(false);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
 
-  const startLuckFlow = useCallback(() => {
-    setDeployed(false);
+  const startOpportunityFlow = useCallback(() => {
     setSelectedOpportunity(null);
     setLoadingMessageIndex(0);
+    setOpportunities(getMockOpportunities(language));
     setStep('loading');
-  }, []);
+  }, [language]);
 
   useEffect(() => {
     if (step !== 'loading') return;
 
     const messageInterval = window.setInterval(() => {
-      setLoadingMessageIndex((prev) => (prev < LOADING_MESSAGES.length - 1 ? prev + 1 : prev));
+      setLoadingMessageIndex((prev) => (prev < o.loading.length - 1 ? prev + 1 : prev));
     }, 500);
 
     const doneTimeout = window.setTimeout(() => {
@@ -42,110 +46,123 @@ export function LuckPage() {
       window.clearInterval(messageInterval);
       window.clearTimeout(doneTimeout);
     };
-  }, [step]);
+  }, [step, o.loading.length]);
 
   const handleSelectOpportunity = (opportunity: Opportunity) => {
     setSelectedOpportunity(opportunity);
     setStep('blueprint');
   };
 
-  const handleDeploy = () => {
-    setDeployed(true);
+  const handleRestart = () => {
+    setStep('hero');
+    setSelectedOpportunity(null);
+    setLinkedIdeaId(null);
   };
 
   return (
-    <SectionBackdrop variant="hero" className="min-h-screen bg-[var(--avril-canvas)] text-foreground">
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-6 py-8 md:py-12">
-        <header className="mb-10 flex items-center justify-between md:mb-14">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+    <FlowShell>
+      <AnimatePresence mode="wait">
+        {step === 'hero' && (
+          <motion.div
+            key="hero"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.4 }}
+            className="flex max-w-2xl flex-col items-center gap-8 text-center"
           >
-            <ArrowLeft size={16} />
-            Back to home
-          </Link>
-          <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">Avril · Generate</span>
-        </header>
+            <Eyebrow pulse>{o.eyebrow}</Eyebrow>
+            <div className="space-y-4">
+              <h1 className="text-balance text-4xl leading-[1.05] tracking-tight md:text-5xl lg:text-6xl">
+                {o.title}
+              </h1>
+              <p className="mx-auto max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">{o.subtitle}</p>
+            </div>
+            <CosmicButton
+              as="button"
+              type="button"
+              onClick={startOpportunityFlow}
+            >
+              {o.cta}
+            </CosmicButton>
+          </motion.div>
+        )}
 
-        <main className="flex flex-1 flex-col items-center justify-center pb-12">
-          <AnimatePresence mode="wait">
-            {step === 'hero' && (
-              <motion.div
-                key="hero"
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.4 }}
-                className="flex max-w-2xl flex-col items-center gap-8 text-center"
-              >
-                <Eyebrow pulse>Opportunity generation</Eyebrow>
-                <div className="space-y-4">
-                  <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight md:text-5xl lg:text-6xl">
-                    Generate your next <span className="text-brand">agentic company</span>
-                  </h1>
-                  <p className="mx-auto max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-                    Press the button and receive three blueprints ready to evaluate. No account required yet.
-                  </p>
-                </div>
-                <CosmicButton
-                  as="button"
-                  type="button"
-                  onClick={startLuckFlow}
-                  className="[&>span:nth-child(3)]:bg-black [&>span:nth-child(3)_span]:text-white"
-                >
-                  I&apos;m feeling lucky
-                </CosmicButton>
-              </motion.div>
-            )}
+        {step === 'loading' && (
+          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <LoadingState message={o.loading[loadingMessageIndex]} />
+          </motion.div>
+        )}
 
-            {step === 'loading' && (
-              <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <LoadingState message={LOADING_MESSAGES[loadingMessageIndex]} />
-              </motion.div>
-            )}
+        {step === 'opportunities' && (
+          <motion.div
+            key="opportunities"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="w-full space-y-8"
+          >
+            <div className="mx-auto max-w-2xl space-y-3 text-center">
+              <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">{o.resultsEyebrow}</p>
+              <h2 className="text-3xl tracking-tight md:text-4xl">{o.resultsTitle}</h2>
+              <p className="text-muted-foreground">{o.resultsSubtitle}</p>
+            </div>
+            <div className="grid gap-6 lg:grid-cols-3">
+              {opportunities.map((opportunity, index) => (
+                <OpportunityCard
+                  key={opportunity.id}
+                  opportunity={opportunity}
+                  index={index}
+                  onSelect={handleSelectOpportunity}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
 
-            {step === 'opportunities' && (
-              <motion.div
-                key="opportunities"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="w-full space-y-8"
-              >
-                <div className="mx-auto max-w-2xl space-y-3 text-center">
-                  <p className="text-xs font-medium uppercase tracking-widest text-brand">3 opportunities detected</p>
-                  <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Choose your next company</h2>
-                  <p className="text-muted-foreground">Each card is a different blueprint. Select one to see the deploy plan.</p>
-                </div>
-                <div className="grid gap-6 lg:grid-cols-3">
-                  {MOCK_OPPORTUNITIES.map((opportunity, index) => (
-                    <OpportunityCard
-                      key={opportunity.id}
-                      opportunity={opportunity}
-                      index={index}
-                      onSelect={handleSelectOpportunity}
-                    />
-                  ))}
-                </div>
-              </motion.div>
-            )}
+        {step === 'blueprint' && selectedOpportunity && (
+          <motion.div key="blueprint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full">
+            <BlueprintPreview
+              opportunity={selectedOpportunity}
+              onBack={() => setStep('opportunities')}
+              onDeploy={() => setStep('deploy')}
+            />
+          </motion.div>
+        )}
 
-            {step === 'blueprint' && selectedOpportunity && (
-              <motion.div key="blueprint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full">
-                {deployed ? (
-                  <DeployGate opportunity={selectedOpportunity} onRestart={startLuckFlow} />
-                ) : (
-                  <BlueprintPreview
-                    opportunity={selectedOpportunity}
-                    onBack={() => setStep('opportunities')}
-                    onDeploy={handleDeploy}
-                  />
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </main>
-      </div>
-    </SectionBackdrop>
+        {step === 'deploy' && selectedOpportunity && (
+          <motion.div key="deploy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
+            <DeployGate
+              opportunity={selectedOpportunity}
+              flowSource="opportunity"
+              onRestart={handleRestart}
+              onComplete={(ideaId) => {
+                setLinkedIdeaId(ideaId);
+                setStep('creating');
+              }}
+            />
+          </motion.div>
+        )}
+
+        {step === 'creating' && selectedOpportunity && (
+          <motion.div key="creating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
+            <CompanyCreating
+              companyName={selectedOpportunity.name}
+              onComplete={() => setStep('dashboard')}
+            />
+          </motion.div>
+        )}
+
+        {step === 'dashboard' && selectedOpportunity && (
+          <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
+            <FlowDashboard
+              companyName={selectedOpportunity.name}
+              ideaId={linkedIdeaId ?? undefined}
+              onRestart={handleRestart}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </FlowShell>
   );
 }

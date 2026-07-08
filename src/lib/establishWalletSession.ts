@@ -82,3 +82,34 @@ export async function establishWalletSession(address: string): Promise<void> {
     throw new Error(err?.error || 'Wallet signature was rejected.');
   }
 }
+
+export async function clearWalletSession(): Promise<void> {
+  await fetch('/api/auth/session', { method: 'DELETE', credentials: 'include' });
+}
+
+export async function resolveConnectedWalletAddress(fallbackAddress?: string | null): Promise<string> {
+  const fromFallback = (fallbackAddress || '').toLowerCase();
+  if (fromFallback) return fromFallback;
+
+  try {
+    const accounts = await window.waap?.request?.({ method: 'eth_requestAccounts' });
+    const addr = Array.isArray(accounts) ? String(accounts[0] || '').toLowerCase() : '';
+    if (addr) return addr;
+  } catch {
+    const ethAccounts = await (window as Window & { ethereum?: { request: (args: { method: string }) => Promise<unknown> } }).ethereum?.request?.({
+      method: 'eth_requestAccounts',
+    });
+    const addr = Array.isArray(ethAccounts) ? String(ethAccounts[0] || '').toLowerCase() : '';
+    if (addr) return addr;
+  }
+
+  throw new Error('Wallet connected but no address was returned. Try again.');
+}
+
+/** WaaP connect + SIWE message sign + server session cookie */
+export async function signInWithWallet(login: () => Promise<void>, fallbackAddress?: string | null): Promise<string> {
+  await login();
+  const address = await resolveConnectedWalletAddress(fallbackAddress);
+  await establishWalletSession(address);
+  return address;
+}

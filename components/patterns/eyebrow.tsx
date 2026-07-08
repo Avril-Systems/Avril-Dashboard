@@ -15,7 +15,7 @@ export function Eyebrow({ children, className, pulse = false }: EyebrowProps) {
       )}
     >
       <span className={cn('h-1.5 w-1.5 rounded-full bg-brand', pulse && 'animate-pulse')} />
-      <span className="text-xs font-medium tracking-wide text-muted-foreground">{children}</span>
+      <span className="text-xs font-heading font-medium tracking-[0.14em] text-muted-foreground">{children}</span>
     </div>
   );
 }

@@ -1,22 +1,36 @@
 export const DEPLOYMENT_PLANS = [
   {
-    id: 'managed',
-    name: 'Managed Cloud',
+    id: 'blueprint',
+    name: 'Blueprint',
     priceLabel: '$99',
-    interval: 'month',
-    description: 'Your agent team runs on Avril-managed infrastructure. Best for shipping fast.',
-    features: ['Private workspace', 'OpenClaw deployment', 'Agent office access', 'Email support'],
+    amountCents: 9900,
+    intervalKey: 'one-time' as const,
+    checkoutMode: 'payment' as const,
+    recommended: false,
+  },
+  {
+    id: 'managed-launch',
+    name: 'Managed Launch',
+    priceLabel: '$999',
+    amountCents: 99900,
+    intervalKey: 'setup' as const,
+    checkoutMode: 'payment' as const,
     recommended: true,
   },
   {
-    id: 'dedicated',
-    name: 'Dedicated Instance',
-    priceLabel: '$299',
-    interval: 'month',
-    description: 'Isolated compute and stricter guardrails for teams with compliance needs.',
-    features: ['Dedicated tenant', 'Custom agent roles', 'Priority orchestration', 'SLA support'],
+    id: 'operator',
+    name: 'Operator',
+    priceLabel: '$199',
+    amountCents: 19900,
+    intervalKey: 'month' as const,
+    checkoutMode: 'subscription' as const,
     recommended: false,
   },
 ] as const;
 
 export type DeploymentPlanId = (typeof DEPLOYMENT_PLANS)[number]['id'];
+
+export const DEPLOY_PLAN_INTERVAL_LABELS = {
+  en: { 'one-time': 'one-time', setup: 'setup', month: 'month' },
+  es: { 'one-time': 'pago único', setup: 'setup', month: 'mes' },
+} as const;

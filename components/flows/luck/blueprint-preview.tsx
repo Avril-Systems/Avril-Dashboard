@@ -1,7 +1,8 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { ArrowLeft, Bot, CheckCircle2, Rocket } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2 } from 'lucide-react';
+import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import type { Opportunity } from './types';
 
@@ -9,9 +10,12 @@ type BlueprintPreviewProps = {
   opportunity: Opportunity;
   onBack: () => void;
   onDeploy: () => void;
+  showBack?: boolean;
 };
 
-export function BlueprintPreview({ opportunity, onBack, onDeploy }: BlueprintPreviewProps) {
+export function BlueprintPreview({ opportunity, onBack, onDeploy, showBack = true }: BlueprintPreviewProps) {
+  const { t } = useLanguage();
+  const b = t.flow.blueprint;
   const { blueprint } = opportunity;
 
   return (
@@ -21,25 +25,30 @@ export function BlueprintPreview({ opportunity, onBack, onDeploy }: BlueprintPre
       transition={{ duration: 0.45, ease: 'easeOut' }}
       className="mx-auto w-full max-w-3xl"
     >
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft size={16} />
-        Volver a oportunidades
-      </button>
+      {showBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft size={16} />
+          {b.back}
+        </button>
+      )}
 
       <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-surface/60 backdrop-blur-xl">
         <div className="relative space-y-8 p-6 md:p-10">
           <div className="space-y-3 text-center md:text-left">
-            <p className="text-xs font-medium uppercase tracking-widest text-brand">Blueprint inicial</p>
-            <h2 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">{opportunity.name}</h2>
+            <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">{b.eyebrow}</p>
+            <h2 className="text-3xl tracking-tight text-foreground md:text-4xl">{opportunity.name}</h2>
             <p className="max-w-2xl text-base leading-relaxed text-muted-foreground">{blueprint.summary}</p>
           </div>
 
+          <Section title={b.offer} content={blueprint.offer} />
+          <Section title={b.idealCustomer} content={blueprint.idealCustomer} />
+
           <div className="space-y-4">
-            <h3 className="text-sm uppercase tracking-widest text-muted-foreground">Primeros 3 pasos para lanzarla</h3>
+            <h3 className="text-sm uppercase tracking-widest text-muted-foreground">{b.launchSteps}</h3>
             <ol className="space-y-3">
               {blueprint.steps.map((step, i) => (
                 <li
@@ -56,7 +65,7 @@ export function BlueprintPreview({ opportunity, onBack, onDeploy }: BlueprintPre
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-sm uppercase tracking-widest text-muted-foreground">Agentes incluidos</h3>
+            <h3 className="text-sm uppercase tracking-widest text-muted-foreground">{b.includedAgents}</h3>
             <div className="flex flex-wrap gap-2">
               {blueprint.agents.map((agent) => (
                 <span
@@ -70,20 +79,41 @@ export function BlueprintPreview({ opportunity, onBack, onDeploy }: BlueprintPre
             </div>
           </div>
 
+          <div className="space-y-3">
+            <h3 className="text-sm uppercase tracking-widest text-muted-foreground">{b.risks}</h3>
+            <ul className="space-y-2">
+              {blueprint.risks.map((risk) => (
+                <li key={risk} className="flex gap-2 text-sm leading-relaxed text-foreground/85">
+                  <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand/50" />
+                  {risk}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-surface-raised/40 px-4 py-3.5">
+            <p className="text-[11px] uppercase tracking-widest text-muted-foreground">{b.deployCost}</p>
+            <p className="mt-1 text-lg font-semibold text-brand">{blueprint.deployCost}</p>
+          </div>
+
           <div className="flex flex-col items-center justify-between gap-4 border-t border-border/50 pt-4 sm:flex-row">
             <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
               <CheckCircle2 size={16} className="text-brand" />
-              Listo para desplegar
+              {b.readyNote}
             </p>
-            <MarketingBrandButton label="Desplegar empresa agéntica" onClick={onDeploy} />
+            <MarketingBrandButton label={b.cta} onClick={onDeploy} />
           </div>
         </div>
       </div>
-
-      <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/70">
-        <Rocket size={12} />
-        Next: sign in and choose a plan to launch
-      </p>
     </motion.div>
+  );
+}
+
+function Section({ title, content }: { title: string; content: string }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm uppercase tracking-widest text-muted-foreground">{title}</h3>
+      <p className="text-sm leading-relaxed text-foreground/90 md:text-base">{content}</p>
+    </div>
   );
 }

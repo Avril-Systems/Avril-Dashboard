@@ -1,10 +1,10 @@
 'use client';
 
-import { Rocket, Sparkles, Radar } from 'lucide-react';
+import { Radar, Sparkles, Rocket } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 
-const PILLAR_ICONS = [Sparkles, Rocket, Radar];
+const PILLAR_ICONS = [Radar, Sparkles, Rocket];
 
 export function MarketingThreePillars() {
   const { t } = useLanguage();
@@ -14,8 +14,8 @@ export function MarketingThreePillars() {
     <section id="pillars" className="border-b border-border bg-background py-16 md:py-20">
       <div className="mx-auto max-w-7xl px-6">
         <div className="mb-10 text-center md:mb-12">
-          <p className="text-xs font-medium uppercase tracking-widest text-brand">{p.label}</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground md:text-4xl">{p.title}</h2>
+          <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">{p.label}</p>
+          <h2 className="mt-2 text-3xl tracking-tight md:text-4xl">{p.title}</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
@@ -27,7 +27,8 @@ export function MarketingThreePillars() {
                   <Icon size={20} className="text-brand" />
                 </div>
                 <div>
-                  <h3 className="mb-3 text-lg font-semibold text-foreground">{pillar.title}</h3>
+                  <h3 className="mb-2 text-lg text-foreground">{pillar.title}</h3>
+                  <p className="mb-3 text-sm leading-relaxed text-muted-foreground">{pillar.description}</p>
                   <ul className="space-y-2">
                     {pillar.features.map((feat) => (
                       <li key={feat} className="flex items-center gap-2 text-sm text-muted-foreground">

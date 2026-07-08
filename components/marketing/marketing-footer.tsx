@@ -5,6 +5,7 @@ import { useLanguage } from './language-context';
 import { Eyebrow } from '@/components/patterns/eyebrow';
 import { SectionBackdrop } from '@/components/patterns/section-backdrop';
 import { MarketingBrandButton } from './marketing-brand-button';
+import { CosmicButton } from '@/components/ui/cosmic-button';
 
 export function MarketingFooterCTA() {
   const { t } = useLanguage();
@@ -14,11 +15,16 @@ export function MarketingFooterCTA() {
     <SectionBackdrop variant="footer" className="border-t border-border py-24" id="contact">
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-8 px-6 text-center">
         <Eyebrow>{c.eyebrow}</Eyebrow>
-        <h2 className="text-balance text-4xl font-semibold leading-tight tracking-tight text-foreground md:text-5xl lg:text-6xl">
+        <h2 className="text-balance text-3xl leading-tight tracking-tight md:text-4xl lg:text-5xl">
           {c.title}
         </h2>
         <p className="max-w-lg text-pretty text-lg leading-relaxed text-muted-foreground">{c.description}</p>
-        <MarketingBrandButton label={c.cta} href="/get-started" />
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <MarketingBrandButton label={c.ctaSecondary} href="/start/idea" />
+          <CosmicButton href="/get-started">
+            {c.ctaPrimary}
+          </CosmicButton>
+        </div>
       </div>
     </SectionBackdrop>
   );
@@ -37,7 +43,7 @@ export function MarketingFooter() {
               <Image src="/Avril.png" alt="Avril logo" width={64} height={40} className="h-8 w-auto object-contain" />
               <span className="text-sm font-semibold text-foreground">{t.brand}</span>
             </div>
-            <p className="max-w-[220px] text-xs leading-relaxed text-muted-foreground">{f.tagline}</p>
+            <p className="max-w-[240px] text-xs leading-relaxed text-muted-foreground">{f.tagline}</p>
           </div>
 
           {f.groups.map((group) => (
@@ -58,7 +64,6 @@ export function MarketingFooter() {
 
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border pt-6 sm:flex-row">
           <p className="text-xs text-muted-foreground">&copy; {new Date().getFullYear()} {f.copyright}</p>
-          <p className="text-xs text-muted-foreground">{f.credit}</p>
         </div>
       </div>
     </footer>

@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { Bot, Gauge, Target, Zap } from 'lucide-react';
 import { CosmicButton } from '@/components/ui/cosmic-button';
+import { useLanguage } from '@/components/marketing/language-context';
 import { cn } from '@/lib/utils';
 import type { Opportunity } from './types';
 
@@ -14,11 +15,11 @@ type OpportunityCardProps = {
 
 function difficultyColor(difficulty: Opportunity['difficulty']) {
   switch (difficulty) {
-    case 'Baja':
+    case 'low':
       return 'text-emerald-400';
-    case 'Media':
+    case 'medium':
       return 'text-amber-400';
-    case 'Alta':
+    case 'high':
       return 'text-rose-400';
   }
 }
@@ -33,6 +34,16 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 export function OpportunityCard({ opportunity, index, onSelect }: OpportunityCardProps) {
+  const { t } = useLanguage();
+  const c = t.flow.cards;
+
+  const difficultyLabel =
+    opportunity.difficulty === 'low'
+      ? c.difficultyLow
+      : opportunity.difficulty === 'medium'
+        ? c.difficultyMedium
+        : c.difficultyHigh;
+
   return (
     <motion.article
       initial={{ opacity: 0, y: 24 }}
@@ -48,20 +59,20 @@ export function OpportunityCard({ opportunity, index, onSelect }: OpportunityCar
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-brand">{opportunity.type}</p>
-            <h3 className="text-xl font-semibold tracking-tight text-foreground md:text-2xl">{opportunity.name}</h3>
+            <h3 className="text-xl tracking-tight text-foreground md:text-2xl">{opportunity.name}</h3>
           </div>
           <div className="shrink-0 rounded-xl border border-brand/25 bg-brand/10 px-3 py-2 text-center">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Score</p>
-            <p className="text-lg font-semibold tabular-nums text-brand">{opportunity.score}</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{c.opportunityScore}</p>
+            <p className="avril-stat-value text-lg tabular-nums text-brand">{opportunity.score}</p>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Cliente ideal" value={opportunity.idealClient} />
-          <Field label="Problema" value={opportunity.problem} />
-          <Field label="Oferta inicial" value={opportunity.offer} />
+          <Field label={c.idealCustomer} value={opportunity.idealClient} />
+          <Field label={c.problem} value={opportunity.problem} />
+          <Field label={c.initialOffer} value={opportunity.offer} />
           <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Agentes necesarios</p>
+            <p className="text-[11px] uppercase tracking-widest text-muted-foreground">{c.requiredAgents}</p>
             <div className="flex flex-wrap gap-1.5">
               {opportunity.agents.map((agent) => (
                 <span
@@ -80,16 +91,16 @@ export function OpportunityCard({ opportunity, index, onSelect }: OpportunityCar
           <div className="rounded-xl border border-border/60 bg-surface-raised/50 px-3 py-2.5">
             <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground">
               <Zap size={12} />
-              Monetización
+              {c.monetizationSpeed}
             </div>
             <p className="text-sm font-medium">{opportunity.monetizationSpeed}</p>
           </div>
           <div className="rounded-xl border border-border/60 bg-surface-raised/50 px-3 py-2.5">
             <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground">
               <Gauge size={12} />
-              Dificultad
+              {c.difficulty}
             </div>
-            <p className={cn('text-sm font-medium', difficultyColor(opportunity.difficulty))}>{opportunity.difficulty}</p>
+            <p className={cn('text-sm font-medium', difficultyColor(opportunity.difficulty))}>{difficultyLabel}</p>
           </div>
         </div>
       </div>
@@ -99,11 +110,11 @@ export function OpportunityCard({ opportunity, index, onSelect }: OpportunityCar
           as="button"
           type="button"
           onClick={() => onSelect(opportunity)}
-          className="w-full sm:w-auto [&>span:nth-child(3)]:bg-black/90 [&>span:nth-child(3)_span]:text-white"
+          className="w-full sm:w-auto"
         >
           <span className="inline-flex items-center gap-2">
             <Target size={14} />
-            Elegir esta empresa
+            {c.choose}
           </span>
         </CosmicButton>
       </div>

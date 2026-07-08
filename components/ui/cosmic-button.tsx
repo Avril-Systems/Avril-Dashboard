@@ -33,8 +33,8 @@ export function CosmicButton<E extends 'a' | 'button' = 'a'>({
           }}
         />
       </span>
-      <span className="relative z-10 flex items-center gap-3 rounded-[12px] bg-muted px-5 py-2.5 shadow-lg transition-all duration-300 active:scale-[0.98]">
-        <span className="text-base font-medium tracking-wide text-foreground">{children ?? 'Continue'}</span>
+      <span className="relative z-10 flex items-center gap-3 rounded-[12px] border border-white/10 bg-black/80 px-5 py-2.5 shadow-lg backdrop-blur-sm transition-all duration-300 active:scale-[0.98]">
+        <span className="font-heading text-base font-medium tracking-wide text-white">{children ?? 'Continue'}</span>
       </span>
     </>
   );

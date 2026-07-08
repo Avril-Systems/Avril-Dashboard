@@ -1,4 +1,6 @@
-export type LuckStep = 'hero' | 'loading' | 'opportunities' | 'blueprint';
+export type FlowStep = 'hero' | 'loading' | 'opportunities' | 'blueprint' | 'deploy' | 'creating' | 'dashboard';
+
+export type Difficulty = 'low' | 'medium' | 'high';
 
 export type Opportunity = {
   id: string;
@@ -9,11 +11,15 @@ export type Opportunity = {
   offer: string;
   agents: string[];
   monetizationSpeed: string;
-  difficulty: 'Baja' | 'Media' | 'Alta';
+  difficulty: Difficulty;
   score: number;
   blueprint: {
     summary: string;
+    offer: string;
+    idealCustomer: string;
     steps: string[];
     agents: string[];
+    risks: string[];
+    deployCost: string;
   };
 };

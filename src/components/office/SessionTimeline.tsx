@@ -1,5 +1,9 @@
 'use client';
 
+import { GlassPanel } from '@/components/patterns/glass-panel';
+import { avrilTypography } from '@/lib/avril-tokens';
+import { cn } from '@/lib/utils';
+
 type EventItem = {
   _id: string;
   type: string;
@@ -17,24 +21,24 @@ function formatTime(iso: string) {
 
 export default function SessionTimeline({ events }: { events: EventItem[] }) {
   return (
-    <div className="glass rounded-2xl p-4 h-[360px] overflow-y-auto">
-      <h4 className="text-sm font-semibold mb-3 font-heading">Live Events</h4>
+    <GlassPanel className="h-[360px] overflow-y-auto p-4">
+      <h4 className={cn(avrilTypography.card, 'mb-3 text-sm')}>Live Events</h4>
       <div className="space-y-2">
-        {events.length === 0 && <p className="text-xs text-muted">No events yet.</p>}
+        {events.length === 0 && <p className="text-xs text-muted-foreground">No events yet.</p>}
         {events.map((e) => (
-          <div key={e._id} className="border border-white/10 rounded-lg p-2 bg-black/20">
+          <div key={e._id} className="rounded-xl border border-border/60 bg-background/40 p-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-white">{e.type}</p>
-              <p className="text-[10px] text-muted">{formatTime(e.createdAt)}</p>
+              <p className="text-xs font-medium text-foreground">{e.type}</p>
+              <p className="text-[10px] text-muted-foreground">{formatTime(e.createdAt)}</p>
             </div>
             {Boolean(e.payload) && (
-              <pre className="mt-1 text-[10px] text-muted overflow-x-auto whitespace-pre-wrap">
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[10px] text-muted-foreground">
                 {String(JSON.stringify(e.payload, null, 2))}
               </pre>
             )}
           </div>
         ))}
       </div>
-    </div>
+    </GlassPanel>
   );
 }

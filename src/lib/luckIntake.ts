@@ -1,9 +1,9 @@
 import type { Opportunity } from '@/components/flows/luck/types';
 
 const RISK_MAP: Record<Opportunity['difficulty'], string> = {
-  Baja: 'balanced',
-  Media: 'balanced',
-  Alta: 'ambitious',
+  low: 'balanced',
+  medium: 'balanced',
+  high: 'ambitious',
 };
 
 export function opportunityToIntake(opportunity: Opportunity) {
@@ -27,7 +27,7 @@ export function opportunityToIntake(opportunity: Opportunity) {
     problem: opportunity.problem,
     monetizationPreference: opportunity.monetizationSpeed,
     businessModelPreference: opportunity.type,
-    desiredAutomationLevel: 'Full agentic company from luck blueprint',
+    desiredAutomationLevel: 'Human-supervised AI-operated company from blueprint',
     channelPreferences: ['luck-flow'],
     riskTolerance: RISK_MAP[opportunity.difficulty],
     luckOpportunityId: opportunity.id,

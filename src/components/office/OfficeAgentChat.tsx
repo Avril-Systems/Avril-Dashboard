@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { GlassPanel } from '@/components/patterns/glass-panel';
+import { cn } from '@/lib/utils';
 
 type AgentOption = {
   agentKey: string;
@@ -119,25 +121,25 @@ export default function OfficeAgentChat({
 
   if (!activeAgent) {
     return (
-      <div className="glass rounded-2xl p-4 flex items-center justify-center h-[420px]">
-        <p className="text-xs text-muted">No agents available to chat with.</p>
-      </div>
+      <GlassPanel className="flex h-[420px] items-center justify-center p-4">
+        <p className="text-xs text-muted-foreground">No agents available to chat with.</p>
+      </GlassPanel>
     );
   }
 
   return (
-    <div className="glass rounded-2xl flex flex-col h-[420px]">
+    <GlassPanel className="flex h-[420px] flex-col overflow-hidden">
       {/* Agent selector bar */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
         <div className="relative flex-1">
           <button
             type="button"
             onClick={() => setSelectorOpen((v) => !v)}
-            className="flex items-center gap-2 w-full text-left rounded-lg px-3 py-1.5 bg-white/5 hover:bg-white/10 transition-colors"
+            className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-1.5 text-left transition-colors hover:border-brand/30 hover:bg-surface/60"
           >
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 flex-shrink-0" />
-            <span className="text-sm text-white font-medium truncate">{activeAgent.name}</span>
-            <span className="text-[11px] text-slate-400 truncate">{activeAgent.role}</span>
+            <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full bg-emerald-400" />
+            <span className="truncate font-heading text-sm font-medium text-foreground">{activeAgent.name}</span>
+            <span className="truncate text-[11px] text-muted-foreground">{activeAgent.role}</span>
             <svg
               className={`ml-auto w-3.5 h-3.5 text-slate-400 transition-transform ${selectorOpen ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -147,7 +149,7 @@ export default function OfficeAgentChat({
           </button>
 
           {selectorOpen && (
-            <div className="absolute top-full left-0 right-0 mt-1 z-20 rounded-lg border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl max-h-[200px] overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 z-20 mt-1 max-h-[200px] overflow-y-auto rounded-lg border border-border/70 bg-background/95 shadow-2xl backdrop-blur-xl">
               {agents.map((ag) => (
                 <button
                   key={ag.agentKey}
@@ -156,20 +158,21 @@ export default function OfficeAgentChat({
                     onSelectAgent(ag.agentKey);
                     setSelectorOpen(false);
                   }}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-white/10 transition-colors ${
-                    ag.agentKey === activeAgent.agentKey ? 'bg-white/5' : ''
-                  }`}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface/60',
+                    ag.agentKey === activeAgent.agentKey && 'bg-brand/10'
+                  )}
                 >
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 flex-shrink-0" />
-                  <span className="text-sm text-white truncate">{ag.name}</span>
-                  <span className="text-[10px] text-slate-400 truncate ml-auto">{ag.role}</span>
+                  <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full bg-emerald-400" />
+                  <span className="truncate text-sm text-foreground">{ag.name}</span>
+                  <span className="ml-auto truncate text-[10px] text-muted-foreground">{ag.role}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        <span className="text-[10px] text-slate-500 flex-shrink-0">
+        <span className="flex-shrink-0 text-[10px] text-muted-foreground">
           {agentMessages.length} msg{agentMessages.length !== 1 ? 's' : ''}
         </span>
       </div>
@@ -178,8 +181,8 @@ export default function OfficeAgentChat({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {agentMessages.length === 0 && (
           <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-slate-500 text-center">
-              Send a message to <span className="text-white">{activeAgent.name}</span>
+            <p className="text-center text-xs text-muted-foreground">
+              Send a message to <span className="text-foreground">{activeAgent.name}</span>
             </p>
           </div>
         )}
@@ -189,14 +192,15 @@ export default function OfficeAgentChat({
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
+              className={cn(
+                'max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed',
                 msg.role === 'user'
-                  ? 'bg-accent/20 text-white'
-                  : 'bg-white/5 text-slate-200'
-              }`}
+                  ? 'border border-brand/30 bg-brand/15 text-foreground'
+                  : 'border border-border/60 bg-background/40 text-foreground/90'
+              )}
             >
               {msg.role === 'agent' && (
-                <p className="text-[10px] text-slate-400 mb-1 font-medium">{msg.agentName}</p>
+                <p className="mb-1 text-[10px] font-medium text-muted-foreground">{msg.agentName}</p>
               )}
               <p className="whitespace-pre-wrap break-words">{msg.content}</p>
             </div>
@@ -204,8 +208,8 @@ export default function OfficeAgentChat({
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-white/5 rounded-xl px-3 py-2">
-              <p className="text-[10px] text-slate-400 mb-1 font-medium">{activeAgent.name}</p>
+            <div className="rounded-xl border border-border/60 bg-background/40 px-3 py-2">
+              <p className="mb-1 text-[10px] font-medium text-muted-foreground">{activeAgent.name}</p>
               <div className="flex gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
                 <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse [animation-delay:150ms]" />
@@ -217,7 +221,7 @@ export default function OfficeAgentChat({
       </div>
 
       {/* Input */}
-      <div className="px-4 py-3 border-t border-white/10">
+      <div className="border-t border-border/60 px-4 py-3">
         <div className="flex gap-2">
           <textarea
             ref={inputRef}
@@ -227,18 +231,18 @@ export default function OfficeAgentChat({
             placeholder={`Message ${activeAgent.name}...`}
             rows={1}
             disabled={sending}
-            className="flex-1 resize-none bg-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 outline-none focus:ring-1 focus:ring-accent/50 disabled:opacity-50"
+            className="flex-1 resize-none rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-brand/50 disabled:opacity-50"
           />
           <button
             type="button"
             onClick={() => void sendMessage()}
             disabled={sending || !input.trim()}
-            className="px-3 py-2 rounded-lg bg-accent/80 hover:bg-accent text-white text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            className="flex-shrink-0 rounded-lg border border-brand/40 bg-brand/20 px-3 py-2 text-sm font-heading font-medium text-brand transition-colors hover:bg-brand/30 disabled:cursor-not-allowed disabled:opacity-30"
           >
             Send
           </button>
         </div>
       </div>
-    </div>
+    </GlassPanel>
   );
 }

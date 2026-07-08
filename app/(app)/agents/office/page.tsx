@@ -6,7 +6,12 @@ import OfficeWorld2D from '@/src/components/office/OfficeWorld2D';
 import OfficeLegend from '@/src/components/office/OfficeLegend';
 import SessionTimeline from '@/src/components/office/SessionTimeline';
 import OfficeAgentChat from '@/src/components/office/OfficeAgentChat';
-import { div } from 'framer-motion/client';
+import { Eyebrow } from '@/components/patterns/eyebrow';
+import { GlassPanel } from '@/components/patterns/glass-panel';
+import { SectionBackdrop } from '@/components/patterns/section-backdrop';
+import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
+import { avrilTypography } from '@/lib/avril-tokens';
+import { cn } from '@/lib/utils';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
 
@@ -40,6 +45,15 @@ type EventItem = {
   payload?: unknown;
   createdAt: string;
 };
+
+function DebugStat({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-background/40 p-3">
+      <p className="text-[11px] font-heading uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
+      <div className="mt-1 text-sm text-foreground">{children}</div>
+    </div>
+  );
+}
 
 export default function AgentOfficePage() {
   const searchParams = useSearchParams();
@@ -93,7 +107,7 @@ export default function AgentOfficePage() {
       active = false;
       clearInterval(id);
     };
-  }, [sessionId]);
+  }, [sessionId, authHeaders]);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.agentKey === selectedAgentKey) ?? null,
@@ -130,93 +144,122 @@ export default function AgentOfficePage() {
   }
 
   return (
-    <div className="font-sans space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="modern-typography-medium gradient-text">Agent Office</h2>
-          <p className="text-xs text-muted mt-1">Session: {sessionId || '—'}</p>
-        </div>
-        {session && (
-          <div></div>
-        )}
-      </div>
-
-      <OfficeLegend />
-      {statusMessage && <p className="text-xs text-yellow-300">{statusMessage}</p>}
-      <div className="glass rounded-2xl p-3">
-        <h4 className="text-sm font-semibold font-heading mb-2">Debug Panel (Temporary)</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-          <div className="border border-white/10 rounded-lg p-2 bg-black/20">
-            <p className="text-muted">WebSocket Status</p>
-            <p className="text-white mt-0.5">{wsStatus}</p>
-          </div>
-          <div className="border border-white/10 rounded-lg p-2 bg-black/20">
-            <p className="text-muted">Last Event</p>
-            <p className="text-white mt-0.5">{lastEvent ? lastEvent.type : '—'}</p>
-            <p className="text-muted/80">{lastEvent ? new Date(lastEvent.createdAt).toLocaleTimeString() : '—'}</p>
-          </div>
-          <div className="border border-white/10 rounded-lg p-2 bg-black/20">
-            <p className="text-muted">Raw Agent Count (Convex)</p>
-            <p className="text-white mt-0.5">{agents.length}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-4">
-        <OfficeWorld2D agents={agents} selectedAgentKey={selectedAgentKey} onSelectAgent={setSelectedAgentKey} />
-
-        <div className="space-y-4">
-          <div className="glass rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="font-heading text-sm">Agent Controls</h4>
-              {resolvedChatId && (
-                <button
-                  type="button"
-                  onClick={() => setShowChat((v) => !v)}
-                  className={`text-xs px-3 py-1 rounded-lg transition-colors ${showChat
-                      ? 'bg-accent/20 text-accent ring-1 ring-accent/30'
-                      : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
-                    }`}
-                >
-                  {showChat ? 'Hide Chat' : 'Chat'}
-                </button>
-              )}
+    <SectionBackdrop className="avril-marketing -mx-4 min-h-[calc(100vh-4rem)] px-4 pb-6 md:-mx-6 md:px-6">
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4 pt-1">
+          <div className="space-y-3">
+            <Eyebrow pulse>Operator console</Eyebrow>
+            <div>
+              <h2 className={cn(avrilTypography.display, 'text-3xl md:text-4xl')}>Agent Office</h2>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                Session · {sessionId || '—'}
+              </p>
             </div>
-            {!selectedAgent && <p className="text-xs text-muted">Select an agent in the map to inspect and control it.</p>}
-            {selectedAgent && (
-              <div className="space-y-2">
-                <p className="text-sm text-white">{selectedAgent.name}</p>
-                <p className="text-xs text-muted">Role: {selectedAgent.role || '—'}</p>
-                <p className="text-xs text-muted">Status: {selectedAgent.status}</p>
-                <div className="flex gap-2 pt-1">
-                  <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => void sendAgentCommand('pause')}>
-                    Pause
-                  </button>
-                  <button className="btn-primary text-xs py-1.5 px-3" onClick={() => void sendAgentCommand('kill')}>
-                    Kill
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
-
-          {showChat && resolvedChatId && (
-            <OfficeAgentChat
-              agents={agents.map((a) => ({
-                agentKey: a.agentKey,
-                name: a.name,
-                role: a.role,
-                status: a.status,
-              }))}
-              chatId={resolvedChatId}
-              selectedAgentKey={selectedAgentKey}
-              onSelectAgent={setSelectedAgentKey}
-            />
+          {session && (
+            <span className="rounded-full border border-brand/30 bg-brand/10 px-3 py-1 text-xs font-heading text-brand">
+              {session.status}
+            </span>
           )}
+        </div>
 
-          <SessionTimeline events={events} />
+        <OfficeLegend />
+        {statusMessage && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            {statusMessage}
+          </p>
+        )}
+
+        <GlassPanel className="p-4">
+          <h4 className={cn(avrilTypography.card, 'mb-3 text-sm')}>Debug Panel (Temporary)</h4>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+            <DebugStat label="WebSocket Status">
+              <span className="capitalize text-brand">{wsStatus}</span>
+            </DebugStat>
+            <DebugStat label="Last Event">
+              <p>{lastEvent ? lastEvent.type : '—'}</p>
+              <p className="text-xs text-muted-foreground">
+                {lastEvent ? new Date(lastEvent.createdAt).toLocaleTimeString() : '—'}
+              </p>
+            </DebugStat>
+            <DebugStat label="Raw Agent Count (Convex)">{agents.length}</DebugStat>
+          </div>
+        </GlassPanel>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_400px]">
+          <OfficeWorld2D
+            agents={agents}
+            selectedAgentKey={selectedAgentKey}
+            onSelectAgent={setSelectedAgentKey}
+          />
+
+          <div className="space-y-4">
+            <GlassPanel className="p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h4 className={cn(avrilTypography.card, 'text-sm')}>Agent Controls</h4>
+                {resolvedChatId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowChat((v) => !v)}
+                    className={cn(
+                      'rounded-full border px-3 py-1 text-xs font-heading transition-colors',
+                      showChat
+                        ? 'border-brand/40 bg-brand/15 text-brand'
+                        : 'border-border/70 bg-surface/60 text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {showChat ? 'Hide Chat' : 'Chat'}
+                  </button>
+                )}
+              </div>
+              {!selectedAgent && (
+                <p className="text-xs text-muted-foreground">
+                  Select an agent in the map to inspect and control it.
+                </p>
+              )}
+              {selectedAgent && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-heading font-semibold text-foreground">{selectedAgent.name}</p>
+                    <p className="text-xs text-muted-foreground">Role · {selectedAgent.role || '—'}</p>
+                    <p className="text-xs text-muted-foreground">Status · {selectedAgent.status}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <MarketingBrandButton
+                      label="Pause"
+                      onClick={() => void sendAgentCommand('pause')}
+                      className="!min-w-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void sendAgentCommand('kill')}
+                      className="inline-flex h-[46px] min-w-[100px] items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 px-5 font-heading text-sm font-medium text-rose-300 transition-colors hover:bg-rose-500/20"
+                    >
+                      Kill
+                    </button>
+                  </div>
+                </div>
+              )}
+            </GlassPanel>
+
+            {showChat && resolvedChatId && (
+              <OfficeAgentChat
+                agents={agents.map((a) => ({
+                  agentKey: a.agentKey,
+                  name: a.name,
+                  role: a.role,
+                  status: a.status,
+                }))}
+                chatId={resolvedChatId}
+                selectedAgentKey={selectedAgentKey}
+                onSelectAgent={setSelectedAgentKey}
+              />
+            )}
+
+            <SessionTimeline events={events} />
+          </div>
         </div>
       </div>
-    </div>
+    </SectionBackdrop>
   );
 }

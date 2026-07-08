@@ -1,21 +1,30 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  clearWalletSession,
+  fetchWalletSession,
+  type WalletSession,
+} from '@/src/lib/establishWalletSession';
 
 type WaaPContextType = {
   address: string | null;
+  walletSession: WalletSession | null;
   isReady: boolean;
   isAuthenticated: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  refreshWalletSession: () => Promise<WalletSession | null>;
 };
 
 const WaaPContext = createContext<WaaPContextType>({
   address: null,
+  walletSession: null,
   isReady: false,
   isAuthenticated: false,
   login: async () => {},
   logout: async () => {},
+  refreshWalletSession: async () => null,
 });
 
 export function useWaaP() {
@@ -24,8 +33,23 @@ export function useWaaP() {
 
 export default function WaaPProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
-  const [isReady, setIsReady] = useState(false);
+  const [walletSession, setWalletSession] = useState<WalletSession | null>(null);
+  const [waapReady, setWaapReady] = useState(false);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
   const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID || '';
+
+  const refreshWalletSession = useCallback(async () => {
+    const session = await fetchWalletSession();
+    setWalletSession(session);
+    if (session?.address) {
+      setAddress((prev) => prev || session.address);
+    }
+    return session;
+  }, []);
+
+  useEffect(() => {
+    void refreshWalletSession().finally(() => setSessionLoaded(true));
+  }, [refreshWalletSession]);
 
   useEffect(() => {
     let mounted = true;
@@ -39,7 +63,7 @@ export default function WaaPProvider({ children }: { children: React.ReactNode }
           config: {
             authenticationMethods: ['wallet', 'social'],
             allowedSocials: ['google'],
-            styles: { darkMode: false },
+            styles: { darkMode: true },
           },
           project: {
             name: 'Avril Dashboard',
@@ -49,22 +73,16 @@ export default function WaaPProvider({ children }: { children: React.ReactNode }
           walletConnectProjectId: walletConnectProjectId || undefined,
         } as any);
 
-        // Attach listener only after SDK is initialized (window.waap is now set)
         const onAccountsChanged = (accounts: string[]) => {
           const addr = Array.isArray(accounts) ? accounts[0] : null;
           setAddress(addr ? String(addr).toLowerCase() : null);
         };
         window.waap?.on?.('accountsChanged', onAccountsChanged);
         removeListener = () => window.waap?.removeListener?.('accountsChanged', onAccountsChanged);
-
-        // Do NOT call eth_requestAccounts automatically here.
-        // The SDK's auto-connect falls back to window.ethereum.request() without
-        // optional chaining; if window.ethereum is broken (e.g. evmAsk.js conflict),
-        // this throws an uncaught "t is not a function". Let the user connect manually.
       } catch {
         if (mounted) setAddress(null);
       } finally {
-        if (mounted) setIsReady(true);
+        if (mounted) setWaapReady(true);
       }
     }
 
@@ -74,46 +92,47 @@ export default function WaaPProvider({ children }: { children: React.ReactNode }
       mounted = false;
       removeListener?.();
     };
-  }, []);
+  }, [walletConnectProjectId]);
 
   const ctx = useMemo<WaaPContextType>(() => {
-    const normalized = (address || '').toLowerCase();
-    const isAuthenticated = !!normalized;
+    const sessionAddress = walletSession?.address?.toLowerCase() || '';
+    const clientAddress = (address || '').toLowerCase();
+    const effectiveAddress = clientAddress || sessionAddress || null;
+    const isAuthenticated = Boolean(effectiveAddress);
 
     return {
-      address,
-      isReady,
+      address: effectiveAddress,
+      walletSession,
+      isReady: waapReady && sessionLoaded,
       isAuthenticated,
+      refreshWalletSession,
       login: async () => {
         try {
           await window.waap?.login?.();
 
-          // Try to read accounts from WaaP first; fall back to window.ethereum if needed.
           let accounts: unknown;
           try {
             accounts = await window.waap?.request?.({ method: 'eth_requestAccounts' });
           } catch {
-            accounts = await (window as any)?.ethereum?.request?.({ method: 'eth_requestAccounts' });
+            accounts = await (window as Window & { ethereum?: { request: (args: { method: string }) => Promise<unknown> } }).ethereum?.request?.({
+              method: 'eth_requestAccounts',
+            });
           }
 
           const addr = Array.isArray(accounts) ? String(accounts[0] || '').toLowerCase() : '';
-
-          if (!addr) {
-            // If we couldn't read the account here, rely on the WaaP accountsChanged event.
-            return;
-          }
-
-          setAddress(addr);
+          if (addr) setAddress(addr);
         } catch {
           setAddress(null);
         }
       },
       logout: async () => {
+        await clearWalletSession();
         await window.waap?.logout?.();
         setAddress(null);
+        setWalletSession(null);
       },
     };
-  }, [address, isReady]);
+  }, [address, walletSession, waapReady, sessionLoaded, refreshWalletSession]);
 
   return <WaaPContext.Provider value={ctx}>{children}</WaaPContext.Provider>;
 }
