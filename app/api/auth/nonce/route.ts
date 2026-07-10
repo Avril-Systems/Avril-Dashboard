@@ -1,5 +1,8 @@
+import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { buildNonceCookie, hasSessionSecret, makeNonce } from '@/src/lib/sessionAuth';
+import { hasSessionSecret, makeNonce, NONCE_COOKIE } from '@/src/lib/sessionAuth';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   if (!hasSessionSecret()) {
@@ -10,7 +13,20 @@ export async function GET() {
   }
 
   const nonce = makeNonce();
-  const res = NextResponse.json({ nonce });
-  res.headers.append('Set-Cookie', buildNonceCookie(nonce));
-  return res;
+  cookies().set(NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 600,
+    path: '/',
+  });
+
+  return NextResponse.json(
+    { nonce },
+    {
+      headers: {
+        'Cache-Control': 'private, no-store, max-age=0',
+      },
+    }
+  );
 }
