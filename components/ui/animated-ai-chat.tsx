@@ -23,6 +23,7 @@ import Folder from "@/components/ui/folder";
 import { FounderWizard, type WizardAnswers } from "@/components/founder/FounderWizard";
 import { useRouter } from "next/navigation";
 import Plan, { type Task } from "@/components/ui/agent-plan";
+import { rememberOfficeSessionId } from "@/src/lib/officeSessionMemory";
 
 interface UseAutoResizeTextareaProps {
   minHeight: number;
@@ -226,7 +227,24 @@ const openClawHandoffTasks: Task[] = [
   },
 ];
 
-export function AnimatedAIChat() {
+export type AnimatedAIChatProps = {
+  /** Entry mode when mounted. Form may still advance to chat after Venice generates (existing handoff). */
+  initialViewMode?: "form" | "chat";
+  /** Hide the Form/Chat pill; parent owns the entry choice. */
+  hideModeToggle?: boolean;
+  /** Hide logo + ignition hero (when parent already showed it on the chooser). */
+  hideHeader?: boolean;
+  /** Marketing flow: brand canvas colors, no violet lab backdrop. */
+  variant?: "default" | "marketing";
+};
+
+export function AnimatedAIChat({
+  initialViewMode = "form",
+  hideModeToggle = false,
+  hideHeader = false,
+  variant = "default",
+}: AnimatedAIChatProps = {}) {
+  const isMarketing = variant === "marketing";
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const router = useRouter();
@@ -250,7 +268,7 @@ export function AnimatedAIChat() {
   /** Wizard stepper generating state */
   const [wizardGenerating, setWizardGenerating] = useState(false);
   /** Top-level view: form (wizard+folder) vs chat */
-  const [viewMode, setViewMode] = useState<"form" | "chat">("form");
+  const [viewMode, setViewMode] = useState<"form" | "chat">(initialViewMode);
   /** Convex ignition draft ready — show OpenClaw handoff (same as /chats). */
   const [ignitionReady, setIgnitionReady] = useState(false);
   const [handoffStarting, setHandoffStarting] = useState(false);
@@ -329,8 +347,27 @@ export function AnimatedAIChat() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  async function ensureChatId(): Promise<string | null> {
-    if (chatId) return chatId;
+  async function ensureChatId(preferredTitle?: string): Promise<string | null> {
+    const cleaned = preferredTitle?.trim().replace(/\s+/g, " ").slice(0, 56) || "";
+    const looksLikeBrief =
+      /^#?\s*agent\s*brief\b/i.test(cleaned) ||
+      /^(conservative|balanced|ambitious)$/i.test(cleaned);
+    const nextTitle = cleaned && !looksLikeBrief ? cleaned : undefined;
+
+    if (chatId) {
+      if (nextTitle) {
+        void fetch("/api/chat/title", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({ chatId, title: nextTitle }),
+        }).catch(() => {});
+      }
+      return chatId;
+    }
     try {
       const res = await fetch("/api/chat/create", {
         method: "POST",
@@ -340,7 +377,7 @@ export function AnimatedAIChat() {
           ...authHeaders,
         },
         body: JSON.stringify({
-          title: "Home Venice Chat",
+          title: nextTitle || "New idea",
           area: "General",
         }),
       });
@@ -439,6 +476,7 @@ export function AnimatedAIChat() {
       setWizardGenerating(true);
       setStatus("");
       setViewMode("chat");
+      void ensureChatId(answers.rawIdea);
       setMessages((prev) => [
         ...prev,
         {
@@ -627,6 +665,7 @@ export function AnimatedAIChat() {
         setStatus("Handoff succeeded but no session id returned.");
         return;
       }
+      rememberOfficeSessionId(String(sessionId));
       router.push(`/agents/office?sessionId=${encodeURIComponent(sessionId)}`);
     } catch {
       setStatus("Network error during handoff.");
@@ -654,13 +693,22 @@ export function AnimatedAIChat() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col w-full items-center bg-transparent text-white p-6 pt-12 relative overflow-hidden lab-bg">
-      <div className="absolute inset-0 w-full h-full overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-violet-500/10 rounded-full mix-blend-normal filter blur-[128px] animate-pulse" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-500/10 rounded-full mix-blend-normal filter blur-[128px] animate-pulse delay-700" />
-        <div className="absolute top-1/4 right-1/3 w-64 h-64 bg-fuchsia-500/10 rounded-full mix-blend-normal filter blur-[96px] animate-pulse delay-1000" />
-      </div>
-      <div className="w-full max-w-3xl mx-auto relative px-1 sm:px-0">
+    <div
+      className={cn(
+        "relative flex w-full flex-col items-center overflow-hidden",
+        isMarketing
+          ? "min-h-0 bg-transparent p-0 pt-0 text-foreground"
+          : "lab-bg min-h-screen bg-transparent p-6 pt-12 text-white",
+      )}
+    >
+      {!isMarketing && (
+        <div className="absolute inset-0 h-full w-full overflow-hidden">
+          <div className="absolute top-0 left-1/4 h-96 w-96 animate-pulse rounded-full bg-violet-500/10 mix-blend-normal blur-[128px] filter" />
+          <div className="absolute bottom-0 right-1/4 h-96 w-96 animate-pulse rounded-full bg-indigo-500/10 mix-blend-normal blur-[128px] filter delay-700" />
+          <div className="absolute top-1/4 right-1/3 h-64 w-64 animate-pulse rounded-full bg-fuchsia-500/10 mix-blend-normal blur-[96px] filter delay-1000" />
+        </div>
+      )}
+      <div className={cn("relative mx-auto w-full max-w-3xl px-1 sm:px-0", isMarketing && "max-w-none")}>
         <motion.div
           className="relative z-10 space-y-6"
           initial={{ opacity: 0, y: 20 }}
@@ -668,6 +716,7 @@ export function AnimatedAIChat() {
           transition={{ duration: 0.6, ease: "easeOut" }}
         >
           {/* ── Header ── */}
+          {!hideHeader && (
           <div className="text-center space-y-3">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
@@ -740,62 +789,32 @@ export function AnimatedAIChat() {
               </motion.div>
             </motion.div>
           </div>
+          )}
 
-          {/* ── Form / Chat toggle ── */}
-          <div className="mx-auto flex w-fit rounded-full border border-white/10 bg-white/[0.02] p-0.5">
-            {(["form", "chat"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setViewMode(m)}
-                className={cn(
-                  "rounded-full px-5 py-1.5 text-xs font-medium capitalize transition-all",
-                  viewMode === m ? "bg-violet-500/25 text-white" : "text-white/40 hover:text-white/60",
-                )}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          {/* ── Form / Chat toggle (hidden when parent owns the entry choice) ── */}
+          {!hideModeToggle && (
+            <div className="mx-auto flex w-fit rounded-full border border-white/10 bg-white/[0.02] p-0.5">
+              {(["form", "chat"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setViewMode(m)}
+                  className={cn(
+                    "rounded-full px-5 py-1.5 text-xs font-medium capitalize transition-all",
+                    viewMode === m ? "bg-violet-500/25 text-white" : "text-white/40 hover:text-white/60",
+                  )}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
 
-          {/* ── Form view: wizard + folder ── */}
+          {/* ── Form view: wizard (folder kept available in chat view) ── */}
           {viewMode === "form" && (
-            <>
-              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
-                <FounderWizard onGenerate={handleWizardGenerate} isGenerating={wizardGenerating} />
-              </motion.div>
-
-              <div className="flex flex-col items-center justify-center gap-3">
-                <p className="text-xs text-white/40">Quick start — tap a posture card for an instant Agent brief</p>
-                <div className="relative flex h-[220px] w-full flex-col items-center justify-center gap-2">
-                  <Folder
-                    color="#5227FF"
-                    size={2}
-                    className={cn("custom-folder transition-opacity", folderPaperBusy !== null && "opacity-65")}
-                    items={folderPaperLabels}
-                    onPaperClick={handleFolderProfileClick}
-                  />
-                  <AnimatePresence>
-                    {folderPaperBusy !== null && (
-                      <motion.div
-                        className="flex items-center gap-2 rounded-lg border border-violet-400/20 bg-violet-500/10 px-3 py-1.5"
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 6 }}
-                        transition={{ duration: 0.2 }}
-                        aria-live="polite"
-                      >
-                        <LoaderIcon className="h-3.5 w-3.5 animate-[spin_1.5s_linear_infinite] text-violet-300" />
-                        <span className="text-xs text-violet-300/90">
-                          Venice is drafting your{" "}
-                          {folderPaperBusy === 0 ? "conservative" : folderPaperBusy === 1 ? "balanced" : "ambitious"} brief…
-                        </span>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
+              <FounderWizard onGenerate={handleWizardGenerate} isGenerating={wizardGenerating} />
+            </motion.div>
           )}
 
           {/* ── Chat view ── */}

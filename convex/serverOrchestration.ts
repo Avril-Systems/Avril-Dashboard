@@ -1,6 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
+import { deriveCompanyDisplayName, isPlaceholderChatTitle } from './lib/companyDisplayName';
 
 const SERVER_SECRET_ENV = 'CONVEX_SERVER_SECRET';
 
@@ -44,6 +45,7 @@ export const createSessionServer = mutation({
     organizationId: v.id('organizations'),
     chatId: v.id('chats'),
     serverSecret: v.string(),
+    companyName: v.optional(v.string()),
     status: v.optional(orchestrationStatusValidator),
     spawnRequestId: v.optional(v.string()),
     vpsRef: v.optional(v.string()),
@@ -52,13 +54,34 @@ export const createSessionServer = mutation({
   },
   handler: async (ctx, args) => {
     requireServerSecret(args.serverSecret);
-    requireEntity(await ctx.db.get(args.chatId), 'Chat');
+    const chat = requireEntity(await ctx.db.get(args.chatId), 'Chat');
     requireEntity(await ctx.db.get(args.organizationId), 'Organization');
+
+    const draft = await ctx.db
+      .query('chatIgnitionDrafts')
+      .withIndex('by_chat', (q) => q.eq('chatId', args.chatId))
+      .first();
+
+    const companyName = deriveCompanyDisplayName({
+      companyName: args.companyName,
+      chatTitle: chat.title,
+      captured: draft?.captured,
+      ignitionPrompt: draft?.ignitionPrompt,
+      handoffPayload: draft?.handoffPayload,
+    });
+
+    if (isPlaceholderChatTitle(chat.title) && companyName !== 'Untitled company') {
+      await ctx.db.patch(args.chatId, {
+        title: companyName,
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     const now = new Date().toISOString();
     return await ctx.db.insert('orchestrationSessions', {
       organizationId: args.organizationId,
       chatId: args.chatId,
+      companyName,
       status: args.status ?? 'queued',
       spawnRequestId: args.spawnRequestId,
       vpsRef: args.vpsRef,
@@ -217,7 +240,24 @@ export const getSessionServer = query({
   },
   handler: async (ctx, args) => {
     requireServerSecret(args.serverSecret);
-    return requireEntity(await ctx.db.get(args.sessionId), 'Orchestration session');
+    const session = requireEntity(await ctx.db.get(args.sessionId), 'Orchestration session');
+    const chat = await ctx.db.get(session.chatId);
+    const draft = await ctx.db
+      .query('chatIgnitionDrafts')
+      .withIndex('by_chat', (q) => q.eq('chatId', session.chatId))
+      .first();
+    const companyName = deriveCompanyDisplayName({
+      companyName: session.companyName,
+      chatTitle: chat?.title,
+      captured: draft?.captured,
+      ignitionPrompt: draft?.ignitionPrompt,
+      handoffPayload: draft?.handoffPayload,
+    });
+    return {
+      ...session,
+      companyName,
+      chatTitle: companyName,
+    };
   },
 });
 
@@ -269,5 +309,105 @@ export const listSessionEventsServer = query({
       .order('desc')
       .take(take);
     return events.reverse();
+  },
+});
+
+/** Recent office/company sessions for an org (resume UI). */
+export const listSessionsByOrgServer = query({
+  args: {
+    organizationId: v.id('organizations'),
+    serverSecret: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireEntity(await ctx.db.get(args.organizationId), 'Organization');
+
+    const take = Math.max(1, Math.min(args.limit ?? 50, 100));
+    const sessions = await ctx.db
+      .query('orchestrationSessions')
+      .withIndex('by_org_updatedAt', (q) => q.eq('organizationId', args.organizationId))
+      .order('desc')
+      .take(take);
+
+    const enriched = [];
+    for (const session of sessions) {
+      const chat = await ctx.db.get(session.chatId);
+      const draft = await ctx.db
+        .query('chatIgnitionDrafts')
+        .withIndex('by_chat', (q) => q.eq('chatId', session.chatId))
+        .first();
+      const agents = await ctx.db
+        .query('orchestrationAgents')
+        .withIndex('by_session', (q) => q.eq('sessionId', session._id))
+        .collect();
+      const companyName = deriveCompanyDisplayName({
+        companyName: session.companyName,
+        chatTitle: chat?.title,
+        captured: draft?.captured,
+        ignitionPrompt: draft?.ignitionPrompt,
+        handoffPayload: draft?.handoffPayload,
+      });
+      enriched.push({
+        ...session,
+        companyName,
+        chatTitle: companyName,
+        agentCount: agents.length,
+      });
+    }
+    return enriched;
+  },
+});
+
+/** Rewrite stored "# Agent brief …" labels using draft/chat idea text. */
+export const healSessionDisplayNamesServer = mutation({
+  args: {
+    organizationId: v.id('organizations'),
+    serverSecret: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireEntity(await ctx.db.get(args.organizationId), 'Organization');
+
+    const take = Math.max(1, Math.min(args.limit ?? 100, 200));
+    const sessions = await ctx.db
+      .query('orchestrationSessions')
+      .withIndex('by_org_updatedAt', (q) => q.eq('organizationId', args.organizationId))
+      .order('desc')
+      .take(take);
+
+    let healed = 0;
+    const now = new Date().toISOString();
+
+    for (const session of sessions) {
+      if (!isPlaceholderChatTitle(session.companyName)) continue;
+
+      const chat = await ctx.db.get(session.chatId);
+      const draft = await ctx.db
+        .query('chatIgnitionDrafts')
+        .withIndex('by_chat', (q) => q.eq('chatId', session.chatId))
+        .first();
+
+      const companyName = deriveCompanyDisplayName({
+        companyName: undefined,
+        chatTitle: chat?.title,
+        captured: draft?.captured,
+        ignitionPrompt: draft?.ignitionPrompt,
+        handoffPayload: draft?.handoffPayload,
+      });
+
+      if (companyName === 'Untitled company' || companyName === (session.companyName ?? '').trim()) {
+        continue;
+      }
+
+      await ctx.db.patch(session._id, { companyName, updatedAt: now });
+      if (chat && isPlaceholderChatTitle(chat.title)) {
+        await ctx.db.patch(chat._id, { title: companyName, updatedAt: now });
+      }
+      healed += 1;
+    }
+
+    return { healed, scanned: sessions.length };
   },
 });

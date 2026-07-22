@@ -21,9 +21,9 @@ function formatTime(iso: string) {
 
 export default function SessionTimeline({ events }: { events: EventItem[] }) {
   return (
-    <GlassPanel className="h-[360px] overflow-y-auto p-4">
-      <h4 className={cn(avrilTypography.card, 'mb-3 text-sm')}>Live Events</h4>
-      <div className="space-y-2">
+    <GlassPanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+      <h4 className={cn(avrilTypography.card, 'mb-3 shrink-0 text-sm')}>Live Events</h4>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
         {events.length === 0 && <p className="text-xs text-muted-foreground">No events yet.</p>}
         {events.map((e) => (
           <div key={e._id} className="rounded-xl border border-border/60 bg-background/40 p-2">

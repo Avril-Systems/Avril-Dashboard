@@ -121,14 +121,14 @@ export default function OfficeAgentChat({
 
   if (!activeAgent) {
     return (
-      <GlassPanel className="flex h-[420px] items-center justify-center p-4">
+      <GlassPanel className="flex h-[280px] items-center justify-center p-4 xl:h-[320px]">
         <p className="text-xs text-muted-foreground">No agents available to chat with.</p>
       </GlassPanel>
     );
   }
 
   return (
-    <GlassPanel className="flex h-[420px] flex-col overflow-hidden">
+    <GlassPanel className="flex h-[280px] flex-col overflow-hidden xl:h-[320px]">
       {/* Agent selector bar */}
       <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
         <div className="relative flex-1">

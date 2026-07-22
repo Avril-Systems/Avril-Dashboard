@@ -25,7 +25,7 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-export type OpenClawSpawnSource = 'manual_prompt' | 'venice_ignition_draft';
+export type OpenClawSpawnSource = 'manual_prompt' | 'venice_ignition_draft' | 'form_opportunity';
 
 export type RunOpenClawSpawnOk = {
   ok: true;
@@ -54,13 +54,15 @@ export async function runOpenClawSpawn(args: {
   chatId: string;
   prompt: string;
   source?: OpenClawSpawnSource;
+  companyName?: string;
 }): Promise<RunOpenClawSpawnResult> {
-  const { organizationId, chatId, prompt, source = 'manual_prompt' } = args;
+  const { organizationId, chatId, prompt, source = 'manual_prompt', companyName } = args;
   const bridgedMessage = appendSwarmGuardrailsToIgnitionPrompt(prompt);
 
   const sessionId = await createOrchestrationSession({
     organizationId,
     chatId,
+    companyName: companyName?.trim() || undefined,
     status: 'spawning',
   });
 

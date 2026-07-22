@@ -93,10 +93,34 @@ export async function POST(req: Request) {
     }
 
     const organizationId = body.organizationId?.trim() || (await getDefaultOrganizationId());
+    const draftCompany =
+      draft && typeof draft === 'object'
+        ? (() => {
+            const captured =
+              'captured' in draft && draft.captured && typeof draft.captured === 'object'
+                ? (draft.captured as Record<string, unknown>)
+                : null;
+            const handoff =
+              'handoffPayload' in draft &&
+              draft.handoffPayload &&
+              typeof draft.handoffPayload === 'object'
+                ? (draft.handoffPayload as Record<string, unknown>)
+                : null;
+            const fromCaptured =
+              (typeof captured?.companyName === 'string' && captured.companyName.trim()) ||
+              (typeof captured?.rawIdea === 'string' && captured.rawIdea.trim()) ||
+              '';
+            const fromHandoff =
+              (typeof handoff?.companyName === 'string' && handoff.companyName.trim()) || '';
+            return (fromCaptured || fromHandoff).slice(0, 80) || undefined;
+          })()
+        : undefined;
+
     const result = await runOpenClawSpawn({
       organizationId,
       chatId,
       prompt,
+      companyName: draftCompany,
       source: 'venice_ignition_draft',
     });
 

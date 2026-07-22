@@ -493,15 +493,48 @@ export async function POST(req: Request) {
           typeof architectPayload.captured === 'object' &&
           architectPayload.captured !== null &&
           !Array.isArray(architectPayload.captured)
-            ? architectPayload.captured
+            ? (architectPayload.captured as Record<string, unknown>)
             : undefined;
+
+        const ideaFromBrief =
+          message.match(/^(?:company|venture|project|startup|idea)\s*(?:name)?\s*[:\-–]\s*(.+)$/im)?.[1]?.trim() ||
+          message
+            .split(/\n/)
+            .map((l) => l.trim())
+            .find(
+              (l) =>
+                l.length >= 8 &&
+                !/^#+\s*/.test(l) &&
+                !/^agent\s*brief\b/i.test(l.replace(/^#+\s*/, ''))
+            );
+
+        const companyGuess =
+          (typeof capturedFromJson?.companyName === 'string' && capturedFromJson.companyName.trim()) ||
+          (typeof capturedFromJson?.rawIdea === 'string' && capturedFromJson.rawIdea.trim()) ||
+          ideaFromBrief;
+
         await upsertChatIgnitionDraft({
           organizationId,
           chatId,
           phase: 'handoff_ready',
-          captured: capturedFromJson,
+          captured: {
+            ...(capturedFromJson ?? {}),
+            ...(companyGuess
+              ? {
+                  companyName:
+                    (typeof capturedFromJson?.companyName === 'string' && capturedFromJson.companyName.trim()) ||
+                    companyGuess.slice(0, 56),
+                  rawIdea:
+                    (typeof capturedFromJson?.rawIdea === 'string' && capturedFromJson.rawIdea.trim()) ||
+                    companyGuess,
+                }
+              : {}),
+          },
           ignitionPrompt: message,
-          handoffPayload: { kind: 'folder_agent_brief_v1', profileLine: message.split('\n')[0]?.slice(0, 200) },
+          handoffPayload: {
+            kind: 'folder_agent_brief_v1',
+            ...(companyGuess ? { companyName: companyGuess.slice(0, 56) } : {}),
+          },
           lastArchitectPayload: architectPayload ?? undefined,
           nextStatus: 'ready',
         });

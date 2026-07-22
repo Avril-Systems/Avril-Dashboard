@@ -8,6 +8,7 @@ import {
   Cpu,
   Home,
   MessageSquare,
+  SlidersHorizontal,
   UserRound,
   Wallet,
 } from 'lucide-react';
@@ -25,6 +26,12 @@ const NAV_BASE: Array<{
   { href: '/chats', label: 'Chats', color: 'cyan', icon: <MessageSquare className="w-5 h-5 text-white" /> },
   { href: '/wallets', label: 'Wallets', color: 'cyan', icon: <Wallet className="w-5 h-5 text-white" /> },
   { href: '/startup-agent-generator', label: 'Generator', color: 'cyan', icon: <Cpu className="w-5 h-5 text-white" /> },
+  {
+    href: '/founder/control-plane',
+    label: 'Control Plane',
+    color: 'cyan',
+    icon: <SlidersHorizontal className="w-5 h-5 text-white" />,
+  },
 ];
 
 function isNavActive(pathname: string, href: string) {

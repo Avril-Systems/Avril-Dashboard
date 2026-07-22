@@ -59,6 +59,16 @@ export async function createChat(args: {
   });
 }
 
+export async function updateChatTitle(args: { chatId: string; title: string }) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverChats:updateChatTitleServer', {
+    chatId: args.chatId,
+    title: args.title,
+    serverSecret,
+  });
+}
+
 /**
  * List chats for the default (or given) organization.
  */
@@ -144,6 +154,7 @@ export type OrchestrationAgentStatus = 'spawning' | 'idle' | 'working' | 'blocke
 export async function createOrchestrationSession(args: {
   organizationId?: string;
   chatId: string;
+  companyName?: string;
   status?: OrchestrationSessionStatus;
   spawnRequestId?: string;
   vpsRef?: string;
@@ -157,6 +168,7 @@ export async function createOrchestrationSession(args: {
   return await (client as any).mutation('serverOrchestration:createSessionServer', {
     organizationId,
     chatId: args.chatId,
+    companyName: args.companyName,
     status: args.status,
     spawnRequestId: args.spawnRequestId,
     vpsRef: args.vpsRef,
@@ -281,6 +293,17 @@ export async function listOrchestrationEvents(args: { sessionId: string; limit?:
   return await (client as any).query('serverOrchestration:listSessionEventsServer', {
     sessionId: args.sessionId,
     limit: args.limit,
+    serverSecret,
+  });
+}
+
+export async function listOrchestrationSessions(args?: { organizationId?: string; limit?: number }) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const organizationId = args?.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).query('serverOrchestration:listSessionsByOrgServer', {
+    organizationId,
+    limit: args?.limit,
     serverSecret,
   });
 }
@@ -429,6 +452,20 @@ export async function markChatIgnitionSpawned(args: { chatId: string; sessionId:
   return await (client as any).mutation('serverChatIgnition:markChatIgnitionSpawnedServer', {
     chatId: args.chatId,
     sessionId: args.sessionId,
+    serverSecret,
+  });
+}
+
+export async function healOrchestrationSessionNames(args?: {
+  organizationId?: string;
+  limit?: number;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const organizationId = args?.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).mutation('serverOrchestration:healSessionDisplayNamesServer', {
+    organizationId,
+    limit: args?.limit,
     serverSecret,
   });
 }

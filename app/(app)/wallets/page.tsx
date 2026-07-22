@@ -76,8 +76,13 @@ export default function WalletsPage() {
 
   return (
     <div className="font-sans space-y-8">
-      <SectionTitle title="Identity and Approvals" subtitle="Session identity, Human verification, and live approval posture." />
+      <SectionTitle
+        title="Agentic wallet communication layer"
+        subtitle="Root wallet, role matrix, ENS, and ERC-8004 identity for agentic ops."
+      />
       <AgenticWalletLayerPanel />
+
+      <SectionTitle title="Identity and Approvals" subtitle="Session identity, Human verification, and live approval posture." />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         <Card className="p-6 lg:col-span-2 space-y-4">

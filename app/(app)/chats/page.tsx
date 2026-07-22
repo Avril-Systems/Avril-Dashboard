@@ -608,9 +608,11 @@ export default function ChatsPage() {
                 type="button"
                 variant="secondary"
                 className="text-[10px] py-1 px-2"
-                onClick={() => router.push(`/?applyChatDraft=${encodeURIComponent(selectedChatId)}`)}
+                onClick={() =>
+                  router.push(`/founder/control-plane?applyChatDraft=${encodeURIComponent(selectedChatId)}`)
+                }
               >
-                Fill Home · Advanced form from this chat
+                Fill Control Plane form from this chat
               </Button>
             </div>
           </div>

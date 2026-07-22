@@ -1,6 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
+import { deriveCompanyDisplayName, isPlaceholderChatTitle } from './lib/companyDisplayName';
 
 const SERVER_SECRET_ENV = 'CONVEX_SERVER_SECRET';
 
@@ -58,14 +59,34 @@ export const upsertChatIgnitionDraftServer = mutation({
         ...base,
         ...(args.ignitionPrompt !== undefined ? { ignitionPrompt: args.ignitionPrompt } : {}),
       });
-      return existing._id;
+    } else {
+      await ctx.db.insert('chatIgnitionDrafts', {
+        ...base,
+        ignitionPrompt: args.ignitionPrompt,
+        createdAt: now,
+      });
     }
 
-    return await ctx.db.insert('chatIgnitionDrafts', {
-      ...base,
-      ignitionPrompt: args.ignitionPrompt,
-      createdAt: now,
-    });
+    // Persist a human company name onto the chat once the idea is known.
+    // Also overwrite Venice "Agent brief · …" titles that leaked as chat titles.
+    const chat = await ctx.db.get(args.chatId);
+    if (chat) {
+      const companyName = deriveCompanyDisplayName({
+        chatTitle: chat.title,
+        captured: args.captured ?? existing?.captured,
+        ignitionPrompt: args.ignitionPrompt ?? existing?.ignitionPrompt,
+        handoffPayload: args.handoffPayload ?? existing?.handoffPayload,
+      });
+      if (companyName !== 'Untitled company' && isPlaceholderChatTitle(chat.title)) {
+        await ctx.db.patch(args.chatId, { title: companyName, updatedAt: now });
+      }
+    }
+
+    const saved = await ctx.db
+      .query('chatIgnitionDrafts')
+      .withIndex('by_chat', (q) => q.eq('chatId', args.chatId))
+      .first();
+    return saved?._id ?? existing?._id;
   },
 });
 

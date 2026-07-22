@@ -11,9 +11,24 @@
   width: 100%;
   max-width: 32rem;
   border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid color-mix(in oklab, hsl(var(--border)) 70%, transparent);
+  background: color-mix(in oklab, var(--surface) 60%, transparent);
   backdrop-filter: blur(24px);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    0 20px 50px oklch(0 0 0 / 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+.stepper-card::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, color-mix(in oklab, var(--brand) 50%, transparent), transparent);
 }
 
 .stepper-indicator-row {
@@ -53,15 +68,16 @@
   transition: all 250ms;
   border-radius: 0.5rem;
   padding: 0.375rem 0.75rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   background: transparent;
   border: none;
   font-size: 0.8125rem;
+  font-family: var(--font-heading);
 }
 
 .stepper-back:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: hsl(var(--foreground));
 }
 
 .stepper-back.inactive {
@@ -75,27 +91,30 @@
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  background-color: #5227ff;
-  color: #fff;
+  background-color: var(--brand);
+  color: oklch(0.98 0 0);
   font-weight: 500;
   font-size: 0.8125rem;
+  font-family: var(--font-heading);
   letter-spacing: -0.015em;
-  padding: 0.4rem 1rem;
+  padding: 0.45rem 1.15rem;
   cursor: pointer;
   border: none;
+  box-shadow: 0 0 24px color-mix(in oklab, var(--brand) 35%, transparent);
 }
 
 .stepper-next:hover {
-  background-color: #6338ff;
+  background-color: color-mix(in oklab, var(--brand) 88%, white);
 }
 
 .stepper-next:active {
-  background-color: #4520dd;
+  background-color: var(--brand-dim);
 }
 
 .stepper-next:disabled {
   opacity: 0.4;
   pointer-events: none;
+  box-shadow: none;
 }
 
 .stepper-dot-indicator {
@@ -118,7 +137,7 @@
   height: 0.625rem;
   width: 0.625rem;
   border-radius: 9999px;
-  background-color: #fff;
+  background-color: oklch(0.98 0 0);
 }
 
 .stepper-step-num {
@@ -134,7 +153,7 @@
   flex: 1;
   overflow: hidden;
   border-radius: 0.25rem;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: color-mix(in oklab, hsl(var(--border)) 80%, transparent);
 }
 
 .stepper-connector-fill {
@@ -147,5 +166,5 @@
 .stepper-check {
   height: 0.875rem;
   width: 0.875rem;
-  color: #fff;
+  color: oklch(0.98 0 0);
 }

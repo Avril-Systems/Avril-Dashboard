@@ -242,3 +242,120 @@ export function buildIdeaOpportunity(
     },
   };
 }
+
+/** Richer blueprint from the branded Founder Wizard (Build from my idea → Form). */
+export function buildOpportunityFromWizard(
+  language: Language,
+  answers: {
+    rawIdea: string;
+    problem: string;
+    targetUser: string;
+    founderName: string;
+    monetization: string;
+    businessModel: string;
+    riskTolerance: string;
+    automationLevel: string;
+    channels: string;
+    country: string;
+    language: string;
+  },
+  options?: { summaryOverride?: string }
+): Opportunity {
+  const isEs = language === 'es';
+  const idea = answers.rawIdea.trim();
+  const nameFromIdea = idea
+    .replace(
+      /^(?:i\s+(?:want|would like)\s+to\s+(?:build|create|make|start|launch)|we(?:'re| are)\s+building|building|my idea is|idea:)\s+/i,
+      ''
+    )
+    .split(/[.!?\n]/)[0]
+    ?.trim()
+    .slice(0, 48);
+  const name =
+    nameFromIdea ||
+    (answers.founderName.trim()
+      ? `${answers.founderName.trim()}${isEs ? ' · Empresa' : ' · Company'}`
+      : isEs
+        ? 'Mi Empresa'
+        : 'My Company');
+
+  const posture = (answers.riskTolerance || 'balanced').toLowerCase();
+  const agents =
+    posture === 'ambitious'
+      ? ['Scout', 'Growth Operator', 'Publisher', 'Brand Guardian']
+      : posture === 'conservative'
+        ? ['Researcher', 'Compliance Guard', 'Ops Coordinator', 'Brand Guardian']
+        : ['Researcher', 'Ops Coordinator', 'Publisher', 'Brand Guardian'];
+
+  const offerBits = [idea, answers.monetization.trim(), answers.businessModel.trim()].filter(Boolean);
+  const offer = offerBits.join(' · ') || idea;
+  const idealCustomer =
+    answers.targetUser.trim() ||
+    (isEs ? 'Audiencia por definir en semana 1' : 'Audience to refine in week 1');
+  const problem = answers.problem.trim() || idea;
+  const channels = answers.channels.trim();
+
+  const summary =
+    options?.summaryOverride?.trim() ||
+    (isEs
+      ? `Blueprint generado desde tu founder brief para ${name}. ${problem ? `Resuelve: ${problem.slice(0, 160)}` : ''}`.trim()
+      : `Blueprint generated from your founder brief for ${name}. ${problem ? `Solves: ${problem.slice(0, 160)}` : ''}`.trim());
+
+  const steps = isEs
+    ? [
+        'Validar oferta y cliente ideal con Avril.',
+        answers.automationLevel.trim()
+          ? `Configurar agentes con nivel de automatización: ${answers.automationLevel.trim()}.`
+          : 'Configurar agentes supervisados y approval gates.',
+        channels
+          ? `Lanzar primer workflow en canales: ${channels}.`
+          : 'Lanzar primer workflow operado por IA con monitoreo.',
+      ]
+    : [
+        'Validate offer and ideal customer with Avril.',
+        answers.automationLevel.trim()
+          ? `Configure agents with automation level: ${answers.automationLevel.trim()}.`
+          : 'Configure human-supervised agents and approval gates.',
+        channels
+          ? `Launch first AI-operated workflow on: ${channels}.`
+          : 'Launch first AI-operated workflow with monitoring.',
+      ];
+
+  const market = [answers.country.trim(), answers.language.trim()].filter(Boolean).join(' · ');
+
+  return {
+    id: `founder-wizard-${Date.now()}`,
+    name,
+    type: isEs ? 'Blueprint desde founder brief' : 'Blueprint from founder brief',
+    idealClient: idealCustomer,
+    problem,
+    offer,
+    agents: agents.slice(0, 3),
+    monetizationSpeed: isEs ? '2–4 semanas' : '2–4 weeks',
+    difficulty: posture === 'ambitious' ? 'high' : posture === 'conservative' ? 'low' : 'medium',
+    score: posture === 'ambitious' ? 90 : posture === 'conservative' ? 78 : 84,
+    blueprint: {
+      summary,
+      offer,
+      idealCustomer: market ? `${idealCustomer} (${market})` : idealCustomer,
+      steps,
+      agents,
+      risks: isEs
+        ? [
+            'La oferta requiere validación con clientes reales.',
+            'Deploy inicial necesita aprobación humana en cada paso crítico.',
+            posture === 'ambitious'
+              ? 'Ritmo ambicioso aumenta varianza de costos y scope.'
+              : 'Costos de cloud dependen del volumen de workflows.',
+          ]
+        : [
+            'Offer requires validation with real customers.',
+            'Initial deploy needs human approval at each critical step.',
+            posture === 'ambitious'
+              ? 'Ambitious pace increases cost and scope variance.'
+              : 'Cloud costs depend on workflow volume.',
+          ],
+      deployCost: isEs ? '$999 setup + $199/mes Operator' : '$999 setup + $199/mo Operator',
+    },
+  };
+}

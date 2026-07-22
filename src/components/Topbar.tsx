@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 
 const TITLES: Record<string, string> = {
   '/home': 'Menu',
+  '/start/idea': 'Build from my idea',
+  '/founder/control-plane': 'Founder Control Plane',
   '/verify': 'Verification',
   '/agents': 'Agents',
   '/agents/office': 'Agent Office',

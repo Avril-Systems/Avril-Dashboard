@@ -18,6 +18,8 @@ export default defineSchema({
   orchestrationSessions: defineTable({
     organizationId: v.id('organizations'),
     chatId: v.id('chats'),
+    /** Human-facing company label for Agent Office switcher. */
+    companyName: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
       v.literal('spawning'),

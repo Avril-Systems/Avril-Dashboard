@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { LoaderIcon, ChevronDown, ChevronUp } from "lucide-react";
 import Stepper, { Step } from "@/components/ui/stepper";
+import { readWizardDraft, writeWizardDraft } from "@/src/lib/ideaIntakeDraft";
 
 /* ─── types ─── */
 
@@ -77,10 +78,10 @@ function WInput({
   textarea?: boolean;
 }) {
   const cls =
-    "w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white/90 placeholder:text-white/25 outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition-colors";
+    "w-full rounded-xl border border-border/70 bg-surface/60 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30 transition-colors";
   return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium text-white/60">{label}</span>
+    <label className="block space-y-1.5 text-left">
+      <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
       {textarea ? (
         <textarea
           rows={2}
@@ -128,8 +129,8 @@ function ChipSelect({
   };
 
   return (
-    <div className="space-y-1.5">
-      <span className="text-xs font-medium text-white/60">{label}</span>
+    <div className="space-y-1.5 text-left">
+      <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
       <div className="flex flex-wrap gap-1.5">
         {options.map((opt) => {
           const active = selected.includes(opt);
@@ -141,8 +142,8 @@ function ChipSelect({
               className={cn(
                 "rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 active
-                  ? "border-violet-500 bg-violet-500/20 text-white"
-                  : "border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/70",
+                  ? "border-brand/50 bg-brand/15 text-foreground"
+                  : "border-border/70 bg-surface/40 text-muted-foreground hover:border-brand/30 hover:text-foreground",
               )}
             >
               {opt}
@@ -156,8 +157,8 @@ function ChipSelect({
 
 function RiskPicker({ value, onChange }: { value: string; onChange: (v: WizardAnswers["riskTolerance"]) => void }) {
   return (
-    <div className="space-y-1.5">
-      <span className="text-xs font-medium text-white/60">Risk & pace</span>
+    <div className="space-y-1.5 text-left">
+      <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Risk & pace</span>
       <div className="grid grid-cols-3 gap-2">
         {RISK_OPTIONS.map((opt) => (
           <button
@@ -165,14 +166,18 @@ function RiskPicker({ value, onChange }: { value: string; onChange: (v: WizardAn
             type="button"
             onClick={() => onChange(opt.value as WizardAnswers["riskTolerance"])}
             className={cn(
-              "rounded-lg border px-3 py-2.5 text-left transition-all",
+              "rounded-xl border px-3 py-2.5 text-left transition-all",
               value === opt.value
-                ? "border-violet-500 bg-violet-500/20"
-                : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]",
+                ? "border-brand/50 bg-brand/15"
+                : "border-border/70 bg-surface/40 hover:border-brand/30",
             )}
           >
-            <div className={cn("text-xs font-semibold", value === opt.value ? "text-white" : "text-white/60")}>{opt.label}</div>
-            <div className={cn("text-[10px] mt-0.5", value === opt.value ? "text-white/70" : "text-white/35")}>{opt.desc}</div>
+            <div className={cn("text-xs font-semibold", value === opt.value ? "text-foreground" : "text-muted-foreground")}>
+              {opt.label}
+            </div>
+            <div className={cn("mt-0.5 text-[10px]", value === opt.value ? "text-muted-foreground" : "text-muted-foreground/70")}>
+              {opt.desc}
+            </div>
           </button>
         ))}
       </div>
@@ -186,6 +191,23 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
   const [answers, setAnswers] = useState<WizardAnswers>(EMPTY);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [step, setStep] = useState(1);
+  const [draftReady, setDraftReady] = useState(false);
+
+  useEffect(() => {
+    const restored = readWizardDraft();
+    if (restored?.answers) {
+      setAnswers({ ...EMPTY, ...restored.answers });
+      const s = restored.step;
+      if (typeof s === "number" && s >= 1 && s <= 4) setStep(s);
+      setShowAdvanced(Boolean(restored.showAdvanced));
+    }
+    setDraftReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    writeWizardDraft({ answers, step, showAdvanced });
+  }, [answers, step, showAdvanced, draftReady]);
 
   const set = useCallback(
     <K extends keyof WizardAnswers>(key: K, val: WizardAnswers[K]) =>
@@ -215,8 +237,13 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
 
   return (
     <div className="w-full space-y-4">
+      {!draftReady ? (
+        <p className="py-6 text-center text-xs text-muted-foreground">Restoring your draft…</p>
+      ) : (
+      <>
       <Stepper
-        initialStep={1}
+        key="founder-wizard"
+        initialStep={step}
         onStepChange={setStep}
         onFinalStepCompleted={() => onGenerate(answers)}
         backButtonText="Back"
@@ -226,8 +253,8 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
         {/* Step 1 — Idea (always text) */}
         <Step>
           <div className="space-y-3 pb-2">
-            <h2 className="text-base font-semibold text-white/90">What are you building?</h2>
-            <p className="text-xs text-white/45 leading-relaxed">
+            <h2 className="font-heading text-base font-semibold text-foreground">What are you building?</h2>
+            <p className="text-xs leading-relaxed text-muted-foreground">
               {`Describe your idea, who it's for, and the pain it solves.`}
             </p>
             <WInput label="Your idea" value={answers.rawIdea} onChange={(v) => set("rawIdea", v)} placeholder="e.g. AI-powered bookkeeping for freelancers" textarea />
@@ -239,7 +266,7 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
         {/* Step 2 — About you */}
         <Step>
           <div className="space-y-3 pb-2">
-            <h2 className="text-base font-semibold text-white/90">About you</h2>
+            <h2 className="font-heading text-base font-semibold text-foreground">About you</h2>
             <WInput label="Your name" value={answers.founderName} onChange={(v) => set("founderName", v)} placeholder="e.g. Alex" />
             <ChipSelect label="Country / market" options={COUNTRY_OPTIONS} value={answers.country} onChange={(v) => set("country", v)} multi />
             <ChipSelect label="Language" options={LANG_OPTIONS} value={answers.language} onChange={(v) => set("language", v)} multi />
@@ -251,7 +278,7 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
         {/* Step 3 — Economics */}
         <Step>
           <div className="space-y-3 pb-2">
-            <h2 className="text-base font-semibold text-white/90">Economics & execution</h2>
+            <h2 className="font-heading text-base font-semibold text-foreground">Economics & execution</h2>
             <ChipSelect label="Monetization" options={MONETIZATION_OPTIONS} value={answers.monetization} onChange={(v) => set("monetization", v)} multi />
             <ChipSelect label="Business model" options={MODEL_OPTIONS} value={answers.businessModel} onChange={(v) => set("businessModel", v)} multi />
             <RiskPicker value={answers.riskTolerance} onChange={(v) => set("riskTolerance", v)} />
@@ -263,11 +290,11 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
         {/* Step 4 — Review */}
         <Step>
           <div className="space-y-3 pb-2">
-            <h2 className="text-base font-semibold text-white/90">Review & generate</h2>
-            <p className="text-xs text-white/45 leading-relaxed">
+            <h2 className="font-heading text-base font-semibold text-foreground">Review & generate</h2>
+            <p className="text-xs leading-relaxed text-muted-foreground">
               {filledCount}/{Object.keys(answers).length} fields filled. Hit Generate to create your agent brief.
             </p>
-            <div className="space-y-1.5 rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-white/70">
+            <div className="space-y-1.5 rounded-xl border border-border/70 bg-surface/40 p-3 text-xs text-muted-foreground">
               <ReviewLine label="Idea" value={answers.rawIdea} />
               <ReviewLine label="Problem" value={answers.problem} />
               <ReviewLine label="Target user" value={answers.targetUser} />
@@ -283,12 +310,12 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
             </div>
             {isGenerating && (
               <motion.div
-                className="flex items-center gap-2 rounded-lg border border-violet-400/20 bg-violet-500/10 px-3 py-2"
+                className="flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/10 px-3 py-2"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
               >
-                <LoaderIcon className="h-3.5 w-3.5 animate-[spin_1.5s_linear_infinite] text-violet-300" />
-                <span className="text-xs text-violet-300/90">Venice is generating your agent brief…</span>
+                <LoaderIcon className="h-3.5 w-3.5 animate-[spin_1.5s_linear_infinite] text-brand" />
+                <span className="text-xs text-brand">Venice is generating your agent brief…</span>
               </motion.div>
             )}
           </div>
@@ -300,7 +327,7 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
         <button
           type="button"
           onClick={() => setShowAdvanced((p) => !p)}
-          className="flex w-full items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-2 text-xs text-white/50 hover:text-white/70 transition-colors"
+          className="flex w-full items-center justify-between rounded-xl border border-border/70 bg-surface/40 px-4 py-2.5 text-xs text-muted-foreground transition-colors hover:border-brand/30 hover:text-foreground"
         >
           <span>Advanced Settings</span>
           {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -314,8 +341,8 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
               transition={{ duration: 0.25 }}
               className="overflow-hidden"
             >
-              <div className="mt-2 space-y-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
-                <p className="text-[11px] text-white/40 mb-2">Edit any field to refine the generated brief.</p>
+              <div className="mt-2 space-y-2 rounded-xl border border-border/70 bg-surface/40 p-4">
+                <p className="mb-2 text-[11px] text-muted-foreground">Edit any field to refine the generated brief.</p>
                 <WInput label="Idea" value={answers.rawIdea} onChange={(v) => set("rawIdea", v)} />
                 <WInput label="Problem" value={answers.problem} onChange={(v) => set("problem", v)} />
                 <WInput label="Target user" value={answers.targetUser} onChange={(v) => set("targetUser", v)} />
@@ -337,6 +364,8 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
           )}
         </AnimatePresence>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -344,8 +373,8 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
 function ReviewLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex gap-2">
-      <span className="shrink-0 font-medium text-white/40 w-20">{label}</span>
-      <span className={value.trim() ? "text-white/80" : "italic text-white/25"}>{value.trim() || "—"}</span>
+      <span className="w-20 shrink-0 font-medium text-muted-foreground/80">{label}</span>
+      <span className={value.trim() ? "text-foreground" : "italic text-muted-foreground/50"}>{value.trim() || "—"}</span>
     </div>
   );
 }

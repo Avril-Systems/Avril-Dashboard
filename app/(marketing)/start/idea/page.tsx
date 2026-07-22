@@ -1,5 +1,5 @@
-import { IdeaIntakePage } from '@/components/flows/idea/idea-intake-page';
+import { IdeaBuildPage } from '@/components/flows/idea/idea-build-page';
 
 export default function IdeaStartPage() {
-  return <IdeaIntakePage />;
+  return <IdeaBuildPage />;
 }

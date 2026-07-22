@@ -34,7 +34,7 @@ export function SectionBackdrop({
         className="pointer-events-none absolute inset-0"
         style={{ background: glow }}
       />
-      <div className="relative z-10">{children}</div>
+      <div className="relative z-10 flex h-full min-h-0 flex-col">{children}</div>
     </section>
   );
 }

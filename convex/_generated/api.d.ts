@@ -16,6 +16,7 @@ import type * as founderGeneration from "../founderGeneration.js";
 import type * as http from "../http.js";
 import type * as lib_agentAreas from "../lib/agentAreas.js";
 import type * as lib_authz from "../lib/authz.js";
+import type * as lib_companyDisplayName from "../lib/companyDisplayName.js";
 import type * as lib_founderPrompts from "../lib/founderPrompts.js";
 import type * as lib_venice from "../lib/venice.js";
 import type * as serverChatIgnition from "../serverChatIgnition.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   "lib/agentAreas": typeof lib_agentAreas;
   "lib/authz": typeof lib_authz;
+  "lib/companyDisplayName": typeof lib_companyDisplayName;
   "lib/founderPrompts": typeof lib_founderPrompts;
   "lib/venice": typeof lib_venice;
   serverChatIgnition: typeof serverChatIgnition;

@@ -202,6 +202,24 @@ export const setChatSummaryServer = mutation({
   },
 });
 
+/** Server-only: rename a chat (used when an idea/company name becomes known). */
+export const updateChatTitleServer = mutation({
+  args: {
+    chatId: v.id('chats'),
+    title: v.string(),
+    serverSecret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireEntity(await ctx.db.get(args.chatId), 'Chat');
+    const title = args.title.trim().slice(0, 120);
+    if (!title) return null;
+    const now = new Date().toISOString();
+    await ctx.db.patch(args.chatId, { title, updatedAt: now });
+    return title;
+  },
+});
+
 /**
  * Server-only: return message count for a chat (for summarization job).
  */

@@ -192,9 +192,9 @@ export default function OfficeWorld2D({
   return (
     <GlassPanel className="p-2 sm:p-3">
       <div className="relative w-full overflow-hidden rounded-xl border border-border/60 bg-[var(--avril-canvas)]">
-        <div className="relative mx-auto h-[210px] w-full sm:h-[280px] md:h-[420px] lg:h-[620px]">
+        <div className="relative mx-auto h-[220px] w-full sm:h-[260px] md:h-[300px] xl:h-[360px]">
           <div
-            className="absolute left-1/2 top-1/2 origin-center -translate-x-1/2 -translate-y-1/2 scale-[0.46] sm:scale-[0.58] md:scale-[0.78] lg:scale-100"
+            className="absolute left-1/2 top-1/2 origin-center -translate-x-1/2 -translate-y-1/2 scale-[0.48] sm:scale-[0.56] md:scale-[0.68] xl:scale-[0.82]"
             style={{ width: WORLD_WIDTH, height: WORLD_HEIGHT }}
           >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(1200px_700px_at_50%_0%,oklch(0.62_0.14_210/0.10),transparent_55%),radial-gradient(800px_500px_at_100%_100%,oklch(0.62_0.14_210/0.06),transparent_50%)]" />

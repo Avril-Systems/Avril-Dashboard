@@ -241,9 +241,9 @@ function StepIndicator({
     >
       <motion.div
         variants={{
-          inactive: { scale: 1, backgroundColor: "#222", color: "#a3a3a3" },
-          active: { scale: 1, backgroundColor: "#5227FF", color: "#5227FF" },
-          complete: { scale: 1, backgroundColor: "#5227FF", color: "#3b82f6" },
+          inactive: { scale: 1, backgroundColor: "oklch(0.25 0.02 210)", color: "oklch(0.7 0.02 210)" },
+          active: { scale: 1, backgroundColor: "oklch(0.62 0.14 210)", color: "oklch(0.62 0.14 210)" },
+          complete: { scale: 1, backgroundColor: "oklch(0.62 0.14 210)", color: "oklch(0.72 0.12 210)" },
         }}
         transition={{ duration: 0.3 }}
         className="stepper-dot-inner"
@@ -267,7 +267,7 @@ function StepConnector({ isComplete }: { isComplete: boolean }) {
         className="stepper-connector-fill"
         variants={{
           incomplete: { width: 0, backgroundColor: "transparent" },
-          complete: { width: "100%", backgroundColor: "#5227FF" },
+          complete: { width: "100%", backgroundColor: "oklch(0.62 0.14 210)" },
         }}
         initial={false}
         animate={isComplete ? "complete" : "incomplete"}

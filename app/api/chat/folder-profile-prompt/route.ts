@@ -196,7 +196,9 @@ Optional founder / chat context to align the idea (if empty, pick a plausible mo
 ${context.trim() || '(none)'}
 ---
 
-Write the single agentic business prompt now. Start with a title line: # Agent brief · ${profile.charAt(0).toUpperCase()}${profile.slice(1)}`;
+Write the single agentic business prompt now.
+Start with a markdown title that is ONLY the venture or product name (e.g. "# Bookkeeping for freelancers").
+Do NOT title it "Agent brief", the posture name (Conservative/Balanced/Ambitious), or a generic placeholder.`;
 
   const venice = await callVeniceChat([
     { role: 'system', content: SYSTEM },
