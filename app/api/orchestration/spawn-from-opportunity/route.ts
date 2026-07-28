@@ -12,6 +12,8 @@ type SpawnFromOpportunityBody = {
   opportunity?: Opportunity;
   ideaId?: string;
   organizationId?: string;
+  /** Product entry path — distinguishes RAG cards vs form wizard. */
+  intakeSource?: 'rag_opportunity' | 'form_intake';
 };
 
 function buildIgnitionPrompt(opportunity: Opportunity): string {
@@ -72,9 +74,14 @@ export async function POST(req: Request) {
       );
     }
 
+    // TODO(billing): require and atomically consume the paid deploymentIntent
+    // belonging to this company before creating an orchestration session.
+    // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
     const companyName = opportunity.name.trim().slice(0, 80);
     const organizationId = body.organizationId?.trim() || (await getDefaultOrganizationId());
     const prompt = buildIgnitionPrompt(opportunity);
+    const intakeSource = body.intakeSource === 'form_intake' ? 'form_intake' : 'rag_opportunity';
+    const handoffKind = intakeSource === 'form_intake' ? 'form_intake_v1' : 'rag_opportunity_v1';
 
     const chat = await createChat({
       title: companyName,
@@ -100,13 +107,15 @@ export async function POST(req: Request) {
         targetUser: opportunity.idealClient,
         founderIdeaId: body.ideaId ?? undefined,
         opportunityId: opportunity.id,
+        intakeSource,
       },
       ignitionPrompt: prompt,
       handoffPayload: {
-        kind: 'form_opportunity_v1',
+        kind: handoffKind,
         companyName,
         ideaId: body.ideaId ?? null,
         opportunityId: opportunity.id,
+        intakeSource,
       },
       nextStatus: 'ready',
     });
@@ -116,7 +125,7 @@ export async function POST(req: Request) {
       chatId,
       prompt,
       companyName,
-      source: 'form_opportunity',
+      source: intakeSource,
     });
 
     if (!result.ok) {
@@ -140,7 +149,7 @@ export async function POST(req: Request) {
       spawnRequestId: result.spawnRequestId,
       vpsRef: result.vpsRef,
       containerRef: result.containerRef,
-      handoffSource: 'form_opportunity',
+      handoffSource: intakeSource,
     });
   } catch (err) {
     return NextResponse.json(

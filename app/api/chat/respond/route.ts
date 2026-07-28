@@ -496,6 +496,14 @@ export async function POST(req: Request) {
             ? (architectPayload.captured as Record<string, unknown>)
             : undefined;
 
+        const h1Title = message.match(/^#\s+(.+)$/m)?.[1]?.trim().replace(/\s+/g, ' ');
+        const h1Company =
+          h1Title &&
+          !/^agent\s*brief\b/i.test(h1Title) &&
+          !/^(conservative|balanced|ambitious)$/i.test(h1Title)
+            ? h1Title.slice(0, 56)
+            : undefined;
+
         const ideaFromBrief =
           message.match(/^(?:company|venture|project|startup|idea)\s*(?:name)?\s*[:\-–]\s*(.+)$/im)?.[1]?.trim() ||
           message
@@ -503,13 +511,16 @@ export async function POST(req: Request) {
             .map((l) => l.trim())
             .find(
               (l) =>
-                l.length >= 8 &&
+                l.length >= 4 &&
                 !/^#+\s*/.test(l) &&
-                !/^agent\s*brief\b/i.test(l.replace(/^#+\s*/, ''))
+                !/^\*\*.+\*\*:?\s*$/.test(l) &&
+                !/^[A-Za-z][\w\s/()&-]{2,70}:\s*$/.test(l) &&
+                !/^agent\s*brief\b/i.test(l.replace(/^#+\s*/, '')),
             );
 
         const companyGuess =
           (typeof capturedFromJson?.companyName === 'string' && capturedFromJson.companyName.trim()) ||
+          h1Company ||
           (typeof capturedFromJson?.rawIdea === 'string' && capturedFromJson.rawIdea.trim()) ||
           ideaFromBrief;
 
@@ -532,8 +543,9 @@ export async function POST(req: Request) {
           },
           ignitionPrompt: message,
           handoffPayload: {
-            kind: 'folder_agent_brief_v1',
+            kind: 'chat_intake_brief_v1',
             ...(companyGuess ? { companyName: companyGuess.slice(0, 56) } : {}),
+            intakeSource: 'chat_intake',
           },
           lastArchitectPayload: architectPayload ?? undefined,
           nextStatus: 'ready',

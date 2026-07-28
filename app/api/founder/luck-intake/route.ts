@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, rejectLargePayload } from '@/src/lib/apiSecurity';
 import { opportunityToIntake } from '@/src/lib/luckIntake';
-import { createFounderIdea } from '@/src/lib/convexServer';
+import { createFounderIdea, ensureWalletUser } from '@/src/lib/convexServer';
 import {
   buildSessionCookie,
   readSession,
@@ -47,7 +47,15 @@ export async function POST(req: Request) {
     }
 
     const intake = opportunityToIntake(opportunity);
+    let founderUserId: string | undefined;
+    try {
+      founderUserId = await ensureWalletUser(session.address);
+    } catch {
+      // Best-effort wallet link — intake still proceeds for demo spawn.
+    }
     const ideaId = await createFounderIdea({
+      founderUserId,
+      founderWallet: session.address,
       title: intake.title,
       ideaText: intake.rawIdea,
       targetUser: intake.targetUser,
@@ -67,7 +75,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const res = NextResponse.json({ ok: true, ideaId, walletAddress: session.address });
+    const res = NextResponse.json({ ok: true, ideaId, founderUserId, walletAddress: session.address });
     res.headers.append('Set-Cookie', buildSessionCookie(token));
     return res;
   } catch (err) {

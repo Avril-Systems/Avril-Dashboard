@@ -10,13 +10,16 @@ import { GlassPanel } from '@/components/patterns/glass-panel';
 type FlowDashboardProps = {
   companyName: string;
   ideaId?: string;
+  sessionId?: string;
   onRestart: () => void;
 };
 
-export function FlowDashboard({ companyName, ideaId, onRestart }: FlowDashboardProps) {
+export function FlowDashboard({ companyName, ideaId, sessionId, onRestart }: FlowDashboardProps) {
   const { t } = useLanguage();
   const d = t.flow.dashboard;
-  const dashboardHref = '/agents/office';
+  const dashboardHref = sessionId
+    ? `/agents/office?sessionId=${encodeURIComponent(sessionId)}`
+    : '/agents/office';
 
   const stats = [
     { label: d.stats.agents, value: '4', icon: Bot },

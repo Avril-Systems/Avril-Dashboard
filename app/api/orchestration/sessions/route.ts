@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, requireDashboardToken } from '@/src/lib/apiSecurity';
 import { healOrchestrationSessionNames, listOrchestrationSessions } from '@/src/lib/convexServer';
+import { ORCHESTRATION_DEMO_SHARED_ORG } from '@/src/lib/orchestrationDemoScope';
 
 export async function GET(req: Request) {
   try {
@@ -32,6 +33,9 @@ export async function GET(req: Request) {
     const sessions = await listOrchestrationSessions({
       limit: Number.isFinite(limit) ? limit : 50,
     });
+
+    // DEMO: ORCHESTRATION_DEMO_SHARED_ORG — returns all org sessions (see orchestrationDemoScope.ts).
+    void ORCHESTRATION_DEMO_SHARED_ORG;
 
     return NextResponse.json({ ok: true, sessions: sessions ?? [] });
   } catch (err) {

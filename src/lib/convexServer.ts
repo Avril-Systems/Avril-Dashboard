@@ -318,9 +318,20 @@ export async function getControlPlaneState(args: { organizationId?: string }) {
   });
 }
 
+export async function ensureWalletUser(walletAddress: string): Promise<string> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const normalized = walletAddress.trim().toLowerCase();
+  return await (client as any).mutation('serverUsers:ensureWalletUserServer', {
+    walletAddress: normalized,
+    serverSecret,
+  });
+}
+
 export async function createFounderIdea(args: {
   organizationId?: string;
   founderUserId?: string;
+  founderWallet?: string;
   title: string;
   ideaText: string;
   targetUser?: string;
@@ -341,6 +352,7 @@ export async function createFounderIdea(args: {
   return await (client as any).mutation('serverFounder:createFounderIdeaServer', {
     organizationId,
     founderUserId: args.founderUserId,
+    founderWallet: args.founderWallet,
     title: args.title,
     ideaText: args.ideaText,
     targetUser: args.targetUser,

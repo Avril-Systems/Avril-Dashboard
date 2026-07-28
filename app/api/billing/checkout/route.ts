@@ -13,6 +13,7 @@ type CheckoutBody = {
   planId?: DeploymentPlanId;
   companyName?: string;
   flowSource?: string;
+  ideaId?: string;
 };
 
 export async function GET() {
@@ -53,12 +54,17 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!session.luckIdeaId) {
+    if (!session.luckIdeaId && !body.ideaId?.trim()) {
       return NextResponse.json(
         { ok: false, error: { message: 'Save your company selection before checkout.' } },
         { status: 400 }
       );
     }
+
+    // DEMO ONLY: this still falls back to cookie state. Production billing must
+    // create a persisted deploymentIntent per company and confirm it by webhook.
+    // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
+    const linkedIdeaId = body.ideaId?.trim() || session.luckIdeaId!;
 
     const origin = getAppOrigin(req);
 
@@ -68,10 +74,10 @@ export async function POST(req: Request) {
         companyName,
         flowSource,
         origin,
-        ideaId: session.luckIdeaId,
+        ideaId: linkedIdeaId,
       });
 
-      const token = refreshSessionToken(session, { plan: plan.id });
+      const token = refreshSessionToken(session, { plan: plan.id, luckIdeaId: linkedIdeaId });
       if (!token) {
         return NextResponse.json({ ok: false, error: { message: 'Could not update session' } }, { status: 500 });
       }
@@ -82,7 +88,7 @@ export async function POST(req: Request) {
         planId: plan.id,
         companyName,
         flowSource,
-        ideaId: session.luckIdeaId,
+        ideaId: linkedIdeaId,
         checkoutUrl: checkoutSession.url,
         sessionId: checkoutSession.id,
       });
@@ -90,7 +96,7 @@ export async function POST(req: Request) {
       return response;
     }
 
-    const token = refreshSessionToken(session, { plan: plan.id });
+    const token = refreshSessionToken(session, { plan: plan.id, luckIdeaId: linkedIdeaId });
     if (!token) {
       return NextResponse.json({ ok: false, error: { message: 'Could not update session' } }, { status: 500 });
     }
@@ -99,7 +105,7 @@ export async function POST(req: Request) {
       ok: true,
       mode: 'mock',
       planId: plan.id,
-      ideaId: session.luckIdeaId,
+      ideaId: linkedIdeaId,
       checkoutUrl: null,
     });
     res.headers.append('Set-Cookie', buildSessionCookie(token));

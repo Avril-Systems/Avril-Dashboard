@@ -236,6 +236,8 @@ export type AnimatedAIChatProps = {
   hideHeader?: boolean;
   /** Marketing flow: brand canvas colors, no violet lab backdrop. */
   variant?: "default" | "marketing";
+  /** Replace posture folder with a static demo brief + quick-send actions (idea intake). */
+  hideFolder?: boolean;
 };
 
 export function AnimatedAIChat({
@@ -243,6 +245,7 @@ export function AnimatedAIChat({
   hideModeToggle = false,
   hideHeader = false,
   variant = "default",
+  hideFolder = false,
 }: AnimatedAIChatProps = {}) {
   const isMarketing = variant === "marketing";
   const [value, setValue] = useState("");
@@ -282,25 +285,63 @@ export function AnimatedAIChat({
   }, []);
 
   useEffect(() => {
+    if (hideFolder) {
+      setModel("venice");
+      return;
+    }
     const savedModel = localStorage.getItem("avril-dashboard:model-home") as ModelChoice | null;
     if (savedModel === "codex" || savedModel === "opus" || savedModel === "venice") {
       setModel(savedModel);
     }
-  }, []);
+  }, [hideFolder]);
 
   useEffect(() => {
+    if (hideFolder) return;
     localStorage.setItem("avril-dashboard:model-home", model);
-  }, [model]);
+  }, [model, hideFolder]);
 
   const modelLabel = model === "venice" ? "Venice" : model === "codex" ? "OpenClaw (Codex)" : "OpenClaw (Opus)";
   const typingLabel = model === "venice" ? "Venice thinking" : "OpenClaw thinking";
 
-  const commandSuggestions: CommandSuggestion[] = [
-    { icon: <Lightbulb className="w-4 h-4" />, label: "Validate Idea", description: "Test-check a startup concept", prefix: "Validate my startup idea: " },
-    { icon: <Workflow className="w-4 h-4" />, label: "Agent Workflow", description: "Design an agentic ops flow", prefix: "Design an agent workflow that " },
-    { icon: <CalendarRange className="w-4 h-4" />, label: "90-Day Plan", description: "Actionable launch roadmap", prefix: "Build a 90-day launch plan for " },
-    { icon: <Crosshair className="w-4 h-4" />, label: "Find My Niche", description: "Discover a profitable niche", prefix: "Help me pick a niche for an agentic business in " },
-  ];
+  const commandSuggestions: CommandSuggestion[] = useMemo(
+    () =>
+      hideFolder
+        ? [
+            {
+              icon: <Lightbulb className="w-4 h-4" />,
+              label: "Validate Company",
+              description: "Generate a conservative Venice company brief",
+              prefix: "",
+            },
+          ]
+        : [
+            {
+              icon: <Lightbulb className="w-4 h-4" />,
+              label: "Validate Idea",
+              description: "Test-check a startup concept",
+              prefix: "Validate my startup idea: ",
+            },
+            {
+              icon: <Workflow className="w-4 h-4" />,
+              label: "Agent Workflow",
+              description: "Design an agentic ops flow",
+              prefix: "Design an agent workflow that ",
+            },
+            {
+              icon: <CalendarRange className="w-4 h-4" />,
+              label: "90-Day Plan",
+              description: "Actionable launch roadmap",
+              prefix: "Build a 90-day launch plan for ",
+            },
+            {
+              icon: <Crosshair className="w-4 h-4" />,
+              label: "Find My Niche",
+              description: "Discover a profitable niche",
+              prefix: "Help me pick a niche for an agentic business in ",
+            },
+          ],
+    [hideFolder],
+  );
 
   const folderPaperLabels = useMemo(
     () =>
@@ -320,13 +361,13 @@ export function AnimatedAIChat({
   }, [messages, isTyping]);
 
   useEffect(() => {
-    if (value.startsWith("/") && !value.includes(" ")) {
-      setShowCommandPalette(true);
-      setActiveSuggestion(0);
-    } else {
+    if (hideFolder || !value.startsWith("/") || value.includes(" ")) {
       setShowCommandPalette(false);
+      return;
     }
-  }, [value]);
+    setShowCommandPalette(true);
+    setActiveSuggestion(0);
+  }, [value, hideFolder]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => setMousePosition({ x: e.clientX, y: e.clientY });
@@ -409,15 +450,11 @@ export function AnimatedAIChat({
     [adjustHeight],
   );
 
-  const handleFolderProfileClick = useCallback(
-    async (index: number) => {
+  const generateProfilePrompt = useCallback(
+    async (profile: "conservative" | "balanced" | "ambitious", busyIndex: number | null = null) => {
       if (folderPaperBusy !== null) return;
-      const profiles = ["conservative", "balanced", "ambitious"] as const;
-      const profile = profiles[index];
-      if (!profile) return;
-
       const posture = profile.charAt(0).toUpperCase() + profile.slice(1);
-      setFolderPaperBusy(index);
+      setFolderPaperBusy(busyIndex);
       setStatus("");
       setViewMode("chat");
       setMessages((prev) => [
@@ -459,8 +496,7 @@ export function AnimatedAIChat({
           return;
         }
 
-        setViewMode("chat");
-      pastePromptToInput(prompt);
+        pastePromptToInput(prompt);
       } catch {
         setStatus("Network error generating prompt.");
       } finally {
@@ -469,6 +505,20 @@ export function AnimatedAIChat({
     },
     [authHeaders, folderPaperBusy, messages, pastePromptToInput],
   );
+
+  const handleFolderProfileClick = useCallback(
+    async (index: number) => {
+      const profiles = ["conservative", "balanced", "ambitious"] as const;
+      const profile = profiles[index];
+      if (!profile) return;
+      await generateProfilePrompt(profile, index);
+    },
+    [generateProfilePrompt],
+  );
+
+  const handleValidateCompany = useCallback(() => {
+    void generateProfilePrompt("conservative", 0);
+  }, [generateProfilePrompt]);
 
   const handleWizardGenerate = useCallback(
     async (answers: WizardAnswers) => {
@@ -548,11 +598,7 @@ export function AnimatedAIChat({
       } else if (e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
         if (activeSuggestion >= 0) {
-          const selectedCommand = commandSuggestions[activeSuggestion];
-          setValue(selectedCommand.prefix + " ");
-          setShowCommandPalette(false);
-          setRecentCommand(selectedCommand.label);
-          setTimeout(() => setRecentCommand(null), 3500);
+          selectCommandSuggestion(activeSuggestion);
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -564,8 +610,8 @@ export function AnimatedAIChat({
     }
   };
 
-  const handleSendMessage = async () => {
-    const content = value.trim();
+  const handleSendMessage = async (override?: { content?: string; chatTitle?: string }) => {
+    const content = (override?.content ?? value).trim();
     if (!content || isPending || isTyping) return;
 
     setIgnitionReady(false);
@@ -582,7 +628,7 @@ export function AnimatedAIChat({
     });
 
     try {
-      const resolvedChatId = await ensureChatId();
+      const resolvedChatId = await ensureChatId(override?.chatTitle ?? content);
       if (!resolvedChatId) return;
 
       const res = await fetch("/api/chat/respond", {
@@ -685,10 +731,16 @@ export function AnimatedAIChat({
 
   const selectCommandSuggestion = (index: number) => {
     const selectedCommand = commandSuggestions[index];
-    setValue(selectedCommand.prefix);
     setShowCommandPalette(false);
     setRecentCommand(selectedCommand.label);
     setTimeout(() => setRecentCommand(null), 2000);
+
+    if (hideFolder && index === 0) {
+      handleValidateCompany();
+      return;
+    }
+
+    setValue(selectedCommand.prefix);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
@@ -825,18 +877,36 @@ export function AnimatedAIChat({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <motion.p className="text-center text-sm text-white/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                  Model: {modelLabel}
-                </motion.p>
-                <p className="text-center text-[11px] text-white/35 px-2">
-                  Paste or generate an <span className="text-white/50">Agent brief</span>, then <strong className="text-white/60">Send</strong>. When ignition is ready, use{" "}
-                  <strong className="text-white/60">Send to OpenClaw</strong> — runtime gets <strong className="text-white/60">3 swarm</strong> guardrails (not 40+ agents).
-                </p>
+                {!hideFolder ? (
+                  <>
+                    <motion.p className="text-center text-sm text-white/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                      Model: {modelLabel}
+                    </motion.p>
+                    <p className="text-center text-[11px] text-white/35 px-2">
+                      Paste or generate an <span className="text-white/50">Agent brief</span>, then <strong className="text-white/60">Send</strong>. When ignition is ready, use{" "}
+                      <strong className="text-white/60">Send to OpenClaw</strong> — runtime gets <strong className="text-white/60">3 swarm</strong> guardrails (not 40+ agents).
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-center text-sm text-muted-foreground px-2">
+                    Chat with Venice to shape your company. When intake is complete, deploy to OpenClaw.
+                  </p>
+                )}
 
-                <div ref={scrollRef} className="max-h-64 overflow-y-auto space-y-2 px-1">
+                <div
+                  ref={scrollRef}
+                  className={cn("overflow-y-auto space-y-2 px-1", hideFolder ? "max-h-[min(50vh,28rem)]" : "max-h-64")}
+                >
                   {messages.length === 0 ? (
-                    <p className="text-center text-sm text-white/45 px-2">
-                      Tell Avril what you are building—structured ignition syncs to Convex; when you are ready, hand off to OpenClaw and open Agent Office.
+                    <p
+                      className={cn(
+                        "text-center text-sm px-2",
+                        hideFolder ? "text-muted-foreground" : "text-white/45",
+                      )}
+                    >
+                      {hideFolder
+                        ? "Describe what you want to build, or tap Validate Company for a sample brief."
+                        : "Tell Avril what you are building—structured ignition syncs to Convex; when you are ready, hand off to OpenClaw and open Agent Office."}
                     </p>
                   ) : (
                     messages.map((message) => (
@@ -844,10 +914,16 @@ export function AnimatedAIChat({
                         key={message.id}
                         className={cn(
                           "max-w-[88%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap",
-                          message.role === "user" ? "ml-auto bg-white/10 text-white/90" : "mr-auto bg-violet-500/10 text-white/90 border border-violet-400/20",
+                          message.role === "user"
+                            ? hideFolder
+                              ? "ml-auto border border-border/60 bg-surface-raised/60 text-foreground"
+                              : "ml-auto bg-white/10 text-white/90"
+                            : hideFolder
+                              ? "mr-auto border border-brand/20 bg-brand/5 text-foreground"
+                              : "mr-auto bg-violet-500/10 text-white/90 border border-violet-400/20",
                         )}
                       >
-                        <p className="text-[11px] text-white/45 mb-1">
+                        <p className={cn("text-[11px] mb-1", hideFolder ? "text-muted-foreground" : "text-white/45")}>
                           {message.role === "user"
                             ? "You"
                             : message.model === "venice"
@@ -862,9 +938,19 @@ export function AnimatedAIChat({
                   )}
                 </div>
 
-                <motion.div className="relative backdrop-blur-2xl bg-white/[0.02] rounded-2xl border border-white/[0.05] shadow-2xl" initial={{ scale: 0.98 }} animate={{ scale: 1 }} transition={{ delay: 0.1 }}>
+                <motion.div
+                  className={cn(
+                    "relative rounded-2xl border shadow-2xl",
+                    hideFolder
+                      ? "border-border/70 bg-[rgba(0,0,0,0.95)] backdrop-blur-[20px]"
+                      : "backdrop-blur-2xl bg-white/[0.02] border-white/[0.05]",
+                  )}
+                  initial={{ scale: 0.98 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.1 }}
+                >
                   <AnimatePresence>
-                    {showCommandPalette && (
+                    {!hideFolder && showCommandPalette && (
                       <motion.div
                         ref={commandPaletteRef}
                         className="absolute left-4 right-4 bottom-full mb-2 backdrop-blur-xl bg-black/90 rounded-lg z-50 shadow-lg border border-white/10 overflow-hidden"
@@ -907,17 +993,17 @@ export function AnimatedAIChat({
                       onKeyDown={handleKeyDown}
                       onFocus={() => setInputFocused(true)}
                       onBlur={() => setInputFocused(false)}
-                      placeholder={`Ask ${modelLabel} a question...`}
+                      placeholder={hideFolder ? "Describe your company idea…" : `Ask ${modelLabel} a question...`}
                       containerClassName="w-full"
                       className={cn(
                         "w-full px-4 py-3",
                         "resize-none",
                         "bg-transparent",
                         "border-none",
-                        "text-white/90 text-sm",
+                        "text-sm",
                         "focus:outline-none",
-                        "placeholder:text-white/20",
                         "min-h-[60px]",
+                        hideFolder ? "text-foreground placeholder:text-muted-foreground" : "text-white/90 placeholder:text-white/20",
                       )}
                       style={{ overflow: "hidden" }}
                       showRing={false}
@@ -925,7 +1011,7 @@ export function AnimatedAIChat({
                   </div>
 
                   <AnimatePresence>
-                    {attachments.length > 0 && (
+                    {!hideFolder && attachments.length > 0 && (
                       <motion.div className="px-4 pb-3 flex gap-2 flex-wrap" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
                         {attachments.map((file, index) => (
                           <motion.div
@@ -945,7 +1031,27 @@ export function AnimatedAIChat({
                     )}
                   </AnimatePresence>
 
-                  <div className="p-4 border-t border-white/[0.05] flex items-center justify-between gap-4">
+                  <div
+                    className={cn(
+                      "p-4 border-t flex items-center justify-between gap-4",
+                      hideFolder ? "border-border/50" : "border-white/[0.05]",
+                    )}
+                  >
+                    {hideFolder ? (
+                      <button
+                        type="button"
+                        onClick={handleValidateCompany}
+                        disabled={folderPaperBusy !== null}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-surface/40 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-brand/30 hover:text-foreground disabled:opacity-60"
+                      >
+                        {folderPaperBusy !== null ? (
+                          <LoaderIcon className="h-3.5 w-3.5 animate-[spin_1.5s_linear_infinite]" />
+                        ) : (
+                          <Lightbulb className="h-3.5 w-3.5 text-brand" />
+                        )}
+                        Validate Company
+                      </button>
+                    ) : (
                     <div className="flex items-center gap-3">
                       <select
                         value={model}
@@ -975,6 +1081,7 @@ export function AnimatedAIChat({
                         <span className="absolute inset-0 bg-white/[0.05] rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                       </motion.button>
                     </div>
+                    )}
 
                     <motion.button
                       type="button"
@@ -985,7 +1092,13 @@ export function AnimatedAIChat({
                       className={cn(
                         "px-4 py-2 rounded-lg text-sm font-medium transition-all",
                         "flex items-center gap-2",
-                        value.trim() ? "bg-white text-[#0A0A0B] shadow-lg shadow-white/10" : "bg-white/[0.05] text-white/40",
+                        hideFolder
+                          ? value.trim()
+                            ? "bg-brand text-white shadow-lg shadow-brand/20"
+                            : "bg-surface/60 text-muted-foreground"
+                          : value.trim()
+                            ? "bg-white text-[#0A0A0B] shadow-lg shadow-white/10"
+                            : "bg-white/[0.05] text-white/40",
                       )}
                     >
                       {isTyping ? <LoaderIcon className="w-4 h-4 animate-[spin_2s_linear_infinite]" /> : <SendIcon className="w-4 h-4" />}
@@ -994,10 +1107,19 @@ export function AnimatedAIChat({
                   </div>
                 </motion.div>
 
-                {status ? <p className="text-xs text-center text-yellow-300">{status}</p> : null}
+                {status ? (
+                  <p className={cn("text-xs text-center", hideFolder ? "text-amber-400/90" : "text-yellow-300")}>{status}</p>
+                ) : null}
 
                 {ignitionReady && chatId ? (
-                  <div className="flex flex-col items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3">
+                  <div
+                    className={cn(
+                      "flex flex-col items-center gap-2 rounded-xl border px-4 py-3",
+                      hideFolder
+                        ? "border-brand/30 bg-brand/5"
+                        : "border-emerald-500/25 bg-emerald-500/10",
+                    )}
+                  >
                     <AnimatePresence mode="wait">
                       {handoffStarting ? (
                         <motion.div
@@ -1008,7 +1130,12 @@ export function AnimatedAIChat({
                           exit={{ opacity: 0, y: -8 }}
                           transition={{ duration: 0.25 }}
                         >
-                          <p className="text-xs text-center text-emerald-200/80 mb-2 font-medium">
+                          <p
+                            className={cn(
+                              "text-xs text-center mb-2 font-medium",
+                              hideFolder ? "text-muted-foreground" : "text-emerald-200/80",
+                            )}
+                          >
                             Handing off to OpenClaw — running 3-swarm guardrails…
                           </p>
                           <Plan
@@ -1026,8 +1153,15 @@ export function AnimatedAIChat({
                           exit={{ opacity: 0, y: -8 }}
                           transition={{ duration: 0.25 }}
                         >
-                          <p className="text-xs text-center text-emerald-100/90">
-                            Ignition ready for this chat. Hand off to production OpenClaw (3 swarms, ≤12 agents MVP).
+                          <p
+                            className={cn(
+                              "text-xs text-center",
+                              hideFolder ? "text-muted-foreground" : "text-emerald-100/90",
+                            )}
+                          >
+                            {hideFolder
+                              ? "Intake complete. Deploy your company to OpenClaw (3 swarms, ≤12 agents)."
+                              : "Ignition ready for this chat. Hand off to production OpenClaw (3 swarms, ≤12 agents MVP)."}
                           </p>
                           <div className="flex flex-wrap items-center justify-center gap-2">
                             <motion.button
@@ -1035,10 +1169,17 @@ export function AnimatedAIChat({
                               onClick={() => void handleHandoffToOpenClaw()}
                               disabled={handoffStarting}
                               whileTap={{ scale: 0.98 }}
-                              className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-400"
+                              className={cn(
+                                "rounded-lg px-4 py-2 text-xs font-semibold text-white transition-colors",
+                                hideFolder
+                                  ? "bg-brand hover:bg-brand/90"
+                                  : "bg-emerald-500 hover:bg-emerald-400",
+                              )}
                             >
-                              Send to OpenClaw
+                              Deploy to OpenClaw
                             </motion.button>
+                            {!hideFolder ? (
+                              <>
                             <motion.button
                               type="button"
                               onClick={() => router.push(`/chats?chatId=${encodeURIComponent(chatId)}`)}
@@ -1061,6 +1202,21 @@ export function AnimatedAIChat({
                                 Open existing office
                               </motion.button>
                             ) : null}
+                              </>
+                            ) : existingOfficeSessionId ? (
+                              <motion.button
+                                type="button"
+                                onClick={() =>
+                                  router.push(
+                                    `/agents/office?sessionId=${encodeURIComponent(existingOfficeSessionId)}`,
+                                  )
+                                }
+                                whileTap={{ scale: 0.98 }}
+                                className="rounded-lg border border-border/70 bg-surface/40 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+                              >
+                                Open existing office
+                              </motion.button>
+                            ) : null}
                           </div>
                         </motion.div>
                       )}
@@ -1068,10 +1224,11 @@ export function AnimatedAIChat({
                   </div>
                 ) : null}
 
+                {!hideFolder ? (
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {commandSuggestions.map((suggestion, index) => (
                     <motion.button
-                      key={suggestion.prefix}
+                      key={suggestion.prefix || suggestion.label}
                       onClick={() => selectCommandSuggestion(index)}
                       className="flex items-center gap-2 px-3 py-2 bg-white/[0.02] hover:bg-white/[0.05] rounded-lg text-sm text-white/60 hover:text-white/90 transition-all relative group"
                       initial={{ opacity: 0, y: 10 }}
@@ -1090,8 +1247,10 @@ export function AnimatedAIChat({
                     </motion.button>
                   ))}
                 </div>
+                ) : null}
 
-                {/* ── Fast Ideas Folder (in chat view) ── */}
+                {/* ── Posture folder (lab chat only) ── */}
+                {!hideFolder ? (
                 <div className="flex flex-col items-center justify-center gap-3 pt-2">
                   <p className="text-xs text-white/40">Quick start — tap a posture card for an instant Agent brief</p>
                   <div className="relative flex h-[220px] w-full flex-col items-center justify-center gap-2">
@@ -1122,6 +1281,7 @@ export function AnimatedAIChat({
                     </AnimatePresence>
                   </div>
                 </div>
+                ) : null}
               </motion.div>
           )}
         </motion.div>

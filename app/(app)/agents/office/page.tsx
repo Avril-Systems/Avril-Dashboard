@@ -14,6 +14,7 @@ import { MarketingBrandButton } from '@/components/marketing/marketing-brand-but
 import { avrilTypography } from '@/lib/avril-tokens';
 import { cn } from '@/lib/utils';
 import { readLastOfficeSessionId, rememberOfficeSessionId } from '@/src/lib/officeSessionMemory';
+import { ORCHESTRATION_DEMO_SHARED_ORG } from '@/src/lib/orchestrationDemoScope';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
 
@@ -95,38 +96,28 @@ function useAuthHeaders() {
   }, []);
 }
 
-/** Prefer last-opened, then best “live” company, else most recently updated. */
+/** Prefer last-opened session, else newest company (API returns updatedAt desc). */
 function pickDefaultSessionId(
   sessions: SessionSummary[],
   lastSessionId: string | null
 ): string | null {
   if (!sessions.length) return null;
-  if (lastSessionId && sessions.some((s) => s._id === lastSessionId)) {
+
+  // DEMO: shared org — production should filter `sessions` by wallet user first.
+  void ORCHESTRATION_DEMO_SHARED_ORG;
+
+  const sorted = [...sessions].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+
+  if (lastSessionId && sorted.some((s) => s._id === lastSessionId)) {
     return lastSessionId;
   }
 
-  const rank = (s: SessionSummary) => {
-    const agents = s.agentCount ?? 0;
-    const statusScore =
-      s.status === 'active'
-        ? 400
-        : s.status === 'spawning' || s.status === 'queued'
-          ? 300
-          : s.status === 'completed'
-            ? 100
-            : 0;
-    return statusScore + Math.min(agents, 50) * 2;
-  };
-
-  const sorted = [...sessions].sort((a, b) => {
-    const diff = rank(b) - rank(a);
-    if (diff !== 0) return diff;
-    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  });
   return sorted[0]?._id ?? null;
 }
 
-function useCompanySessions(authHeaders: Record<string, string>) {
+function useCompanySessions(authHeaders: Record<string, string>, reloadKey = '') {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -162,7 +153,7 @@ function useCompanySessions(authHeaders: Record<string, string>) {
       active = false;
       clearInterval(id);
     };
-  }, [authHeaders]);
+  }, [authHeaders, reloadKey]);
 
   return { sessions, loading, error };
 }
@@ -187,6 +178,11 @@ function OfficeCompaniesSidebar({
           Companies
         </p>
         <p className="text-xs text-muted-foreground">Switch office sessions</p>
+        {ORCHESTRATION_DEMO_SHARED_ORG && (
+          <p className="text-[10px] leading-snug text-muted-foreground/80">
+            Demo: all companies in shared org. Production will scope by wallet.
+          </p>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2">
@@ -539,7 +535,7 @@ function AgentOfficePageContent() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('sessionId')?.trim() || '';
   const authHeaders = useAuthHeaders();
-  const { sessions, loading, error } = useCompanySessions(authHeaders);
+  const { sessions, loading, error } = useCompanySessions(authHeaders, sessionId);
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
   const [autoOpenAttempted, setAutoOpenAttempted] = useState(false);

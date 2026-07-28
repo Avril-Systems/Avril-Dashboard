@@ -10,6 +10,7 @@ import { readWizardDraft, writeWizardDraft } from "@/src/lib/ideaIntakeDraft";
 /* ─── types ─── */
 
 export interface WizardAnswers {
+  companyName: string;
   rawIdea: string;
   problem: string;
   targetUser: string;
@@ -26,6 +27,7 @@ export interface WizardAnswers {
 }
 
 const EMPTY: WizardAnswers = {
+  companyName: "",
   rawIdea: "",
   problem: "",
   targetUser: "",
@@ -218,7 +220,7 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
   const nextDisabled = useMemo(() => {
     switch (step) {
       case 1:
-        return !answers.rawIdea.trim();
+        return !answers.companyName.trim() || !answers.rawIdea.trim();
       case 2:
         return !answers.founderName.trim();
       case 3:
@@ -257,6 +259,7 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
             <p className="text-xs leading-relaxed text-muted-foreground">
               {`Describe your idea, who it's for, and the pain it solves.`}
             </p>
+            <WInput label="Company name" value={answers.companyName} onChange={(v) => set("companyName", v)} placeholder="e.g. Signal Desk" />
             <WInput label="Your idea" value={answers.rawIdea} onChange={(v) => set("rawIdea", v)} placeholder="e.g. AI-powered bookkeeping for freelancers" textarea />
             <WInput label="Problem it solves" value={answers.problem} onChange={(v) => set("problem", v)} placeholder="e.g. Freelancers spend 5+ hrs/wk on invoices" />
             <WInput label="Target user / ICP" value={answers.targetUser} onChange={(v) => set("targetUser", v)} placeholder="e.g. Solo freelancers earning $50-200k/yr" />
@@ -295,6 +298,7 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
               {filledCount}/{Object.keys(answers).length} fields filled. Hit Generate to create your agent brief.
             </p>
             <div className="space-y-1.5 rounded-xl border border-border/70 bg-surface/40 p-3 text-xs text-muted-foreground">
+              <ReviewLine label="Company" value={answers.companyName} />
               <ReviewLine label="Idea" value={answers.rawIdea} />
               <ReviewLine label="Problem" value={answers.problem} />
               <ReviewLine label="Target user" value={answers.targetUser} />

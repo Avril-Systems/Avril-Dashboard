@@ -247,6 +247,7 @@ export function buildIdeaOpportunity(
 export function buildOpportunityFromWizard(
   language: Language,
   answers: {
+    companyName: string;
     rawIdea: string;
     problem: string;
     targetUser: string;
@@ -263,6 +264,7 @@ export function buildOpportunityFromWizard(
 ): Opportunity {
   const isEs = language === 'es';
   const idea = answers.rawIdea.trim();
+  const explicitName = answers.companyName.trim();
   const nameFromIdea = idea
     .replace(
       /^(?:i\s+(?:want|would like)\s+to\s+(?:build|create|make|start|launch)|we(?:'re| are)\s+building|building|my idea is|idea:)\s+/i,
@@ -272,6 +274,7 @@ export function buildOpportunityFromWizard(
     ?.trim()
     .slice(0, 48);
   const name =
+    explicitName ||
     nameFromIdea ||
     (answers.founderName.trim()
       ? `${answers.founderName.trim()}${isEs ? ' · Empresa' : ' · Company'}`

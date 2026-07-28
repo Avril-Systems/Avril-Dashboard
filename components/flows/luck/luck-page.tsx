@@ -1,10 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FlowShell } from '@/components/flows/shared/flow-shell';
 import { useLanguage } from '@/components/marketing/language-context';
 import { Eyebrow } from '@/components/patterns/eyebrow';
+import { GlassPanel } from '@/components/patterns/glass-panel';
+import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { CosmicButton } from '@/components/ui/cosmic-button';
 import { BlueprintPreview } from './blueprint-preview';
 import { LoadingState } from './loading-state';
@@ -13,9 +16,13 @@ import { OpportunityCard } from './opportunity-card';
 import { DeployGate } from './deploy-gate';
 import { FlowDashboard } from '@/components/flows/shared/flow-dashboard';
 import { CompanyCreating } from '@/components/flows/shared/company-creating';
+import { useSpawnFromOpportunity } from '@/src/hooks/useSpawnFromOpportunity';
 import type { FlowStep, Opportunity } from './types';
 
+const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
+
 export function LuckPage() {
+  const router = useRouter();
   const { t, language } = useLanguage();
   const o = t.flow.opportunity;
   const [step, setStep] = useState<FlowStep>('hero');
@@ -23,10 +30,33 @@ export function LuckPage() {
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
+  const [creatingIdeaId, setCreatingIdeaId] = useState<string | null>(null);
+
+  const authHeaders = useMemo<Record<string, string>>(() => {
+    const headers: Record<string, string> = {};
+    if (DASHBOARD_TOKEN) headers['x-dashboard-token'] = DASHBOARD_TOKEN;
+    return headers;
+  }, []);
+
+  const handleDeployComplete = useCallback((ideaId: string) => {
+    setLinkedIdeaId(ideaId);
+    setCreatingIdeaId(ideaId);
+    setStep('creating');
+  }, []);
+
+  const { spawnedSessionId, spawnError } = useSpawnFromOpportunity({
+    active: step === 'creating',
+    opportunity: selectedOpportunity,
+    ideaId: creatingIdeaId,
+    authHeaders,
+    intakeSource: 'rag_opportunity',
+  });
 
   const startOpportunityFlow = useCallback(() => {
     setSelectedOpportunity(null);
     setLoadingMessageIndex(0);
+    // RAG integration boundary: replace this mock source through a validated
+    // server adapter. Contract: docs/CONTRATOS_INTEGRACION_FLUJOS.md.
     setOpportunities(getMockOpportunities(language));
     setStep('loading');
   }, [language]);
@@ -57,7 +87,13 @@ export function LuckPage() {
     setStep('hero');
     setSelectedOpportunity(null);
     setLinkedIdeaId(null);
+    setCreatingIdeaId(null);
   };
+
+  useEffect(() => {
+    if (step !== 'creating' || !spawnedSessionId) return;
+    router.push(`/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`);
+  }, [step, spawnedSessionId, router]);
 
   return (
     <FlowShell>
@@ -137,20 +173,48 @@ export function LuckPage() {
               opportunity={selectedOpportunity}
               flowSource="opportunity"
               onRestart={handleRestart}
-              onComplete={(ideaId) => {
-                setLinkedIdeaId(ideaId);
-                setStep('creating');
-              }}
+              onComplete={handleDeployComplete}
             />
           </motion.div>
         )}
 
         {step === 'creating' && selectedOpportunity && (
           <motion.div key="creating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
-            <CompanyCreating
-              companyName={selectedOpportunity.name}
-              onComplete={() => setStep('dashboard')}
-            />
+            {spawnError ? (
+              <GlassPanel className="mx-auto max-w-md space-y-4 p-6 text-center">
+                <h2 className="text-xl text-foreground">Almost there</h2>
+                <p className="text-sm text-muted-foreground">
+                  Your company <span className="text-brand">{selectedOpportunity.name}</span> was saved, but OpenClaw
+                  spawn failed.
+                </p>
+                <p className="text-xs text-rose-300">{spawnError}</p>
+                <MarketingBrandButton
+                  label="Open Agent Office anyway"
+                  href={
+                    spawnedSessionId
+                      ? `/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`
+                      : '/agents/office'
+                  }
+                  className="mx-auto"
+                />
+                <button
+                  type="button"
+                  onClick={() => setStep('dashboard')}
+                  className="text-sm text-brand hover:underline"
+                >
+                  Continue to summary
+                </button>
+              </GlassPanel>
+            ) : (
+              <CompanyCreating
+                companyName={selectedOpportunity.name}
+                durationMs={12_000}
+                onComplete={() => {
+                  if (!spawnedSessionId && !spawnError) return;
+                  if (!spawnedSessionId) setStep('dashboard');
+                }}
+              />
+            )}
           </motion.div>
         )}
 
@@ -159,6 +223,7 @@ export function LuckPage() {
             <FlowDashboard
               companyName={selectedOpportunity.name}
               ideaId={linkedIdeaId ?? undefined}
+              sessionId={spawnedSessionId ?? undefined}
               onRestart={handleRestart}
             />
           </motion.div>

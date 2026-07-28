@@ -25,6 +25,7 @@ import type * as serverControlPlane from "../serverControlPlane.js";
 import type * as serverDeployments from "../serverDeployments.js";
 import type * as serverFounder from "../serverFounder.js";
 import type * as serverOrchestration from "../serverOrchestration.js";
+import type * as serverUsers from "../serverUsers.js";
 import type * as summarize from "../summarize.js";
 
 import type {
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   serverDeployments: typeof serverDeployments;
   serverFounder: typeof serverFounder;
   serverOrchestration: typeof serverOrchestration;
+  serverUsers: typeof serverUsers;
   summarize: typeof summarize;
 }>;
 

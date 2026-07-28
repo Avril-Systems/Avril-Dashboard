@@ -47,7 +47,7 @@ function shortLabel(text: string, max = 56): string {
 /** Turn free-form idea text into a short company/project label. */
 export function nameFromIdeaText(idea: string | undefined | null, max = 48): string | undefined {
   const raw = asTrimmedString(idea);
-  if (!raw || isPlaceholderTitle(raw)) return undefined;
+  if (!raw || isPlaceholderTitle(raw) || looksLikeSectionHeader(raw)) return undefined;
 
   let t = raw
     .replace(
@@ -58,7 +58,7 @@ export function nameFromIdeaText(idea: string | undefined | null, max = 48): str
   if (!t) t = raw;
 
   const first = t.split(/[.!?\n]/)[0]?.trim() || t;
-  if (!first || isPlaceholderTitle(first)) return undefined;
+  if (!first || isPlaceholderTitle(first) || looksLikeSectionHeader(first)) return undefined;
   return shortLabel(first, max);
 }
 
@@ -75,6 +75,44 @@ function capturedFromPromptJson(prompt: string): Record<string, unknown> | null 
     // ignore malformed prompt JSON
   }
   return null;
+}
+
+/** Section labels from Venice briefs — never company names. */
+function looksLikeSectionHeader(line: string): boolean {
+  const t = line.trim();
+  if (!t) return true;
+  if (/^\*\*[^*].*\*\*:?\s*$/.test(t)) return true;
+  // Markdown headings with # are handled separately (H1 = company name).
+  if (/^#{2,6}\s+/.test(t)) return true;
+  if (/^[A-Za-z][\w\s/()&-]{2,70}:\s*$/.test(t)) return true;
+  return false;
+}
+
+function isBadStoredCompanyName(title: string | undefined): boolean {
+  if (!title) return true;
+  if (isPlaceholderTitle(title)) return true;
+  if (looksLikeSectionHeader(title)) return true;
+  // Stored names sometimes keep markdown bold from a section header.
+  if (/\*\*/.test(title)) return true;
+  return false;
+}
+
+/**
+ * Venice folder-profile briefs start with `# Venture Name`.
+ * Prefer that over later section headers like `**Vision and ICP:**`.
+ */
+export function titleFromMarkdownH1(prompt: string | undefined): string | undefined {
+  if (!prompt?.trim()) return undefined;
+  for (const raw of prompt.split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = line.match(/^#\s+(.+)$/);
+    if (!m?.[1]) continue;
+    const title = m[1].trim().replace(/\s+/g, ' ');
+    if (!title || isPlaceholderTitle(title) || isAgentBriefLabel(title)) continue;
+    if (/^(conservative|balanced|ambitious)$/i.test(title)) continue;
+    return shortLabel(title);
+  }
+  return undefined;
 }
 
 function firstMeaningfulPromptLine(prompt: string | undefined): string | undefined {
@@ -104,11 +142,15 @@ function firstMeaningfulPromptLine(prompt: string | undefined): string | undefin
     }
   }
 
+  // Venice brief format: first H1 is the venture name (e.g. "# EcoClean Solutions").
+  const fromH1 = titleFromMarkdownH1(prompt);
+  if (fromH1) return fromH1;
+
   for (const raw of prompt.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
     if (/^founder control plane/i.test(line)) continue;
-    if (/^#+\s*/.test(line)) continue; // skip markdown headings (often "# Agent brief · …")
+    if (looksLikeSectionHeader(line)) continue;
     if (isAgentBriefLabel(line)) continue;
     if (/^[{[]/.test(line)) continue;
     if (/^["']?(rawIdea|problem|founderName|captured)/i.test(line)) continue;
@@ -130,7 +172,7 @@ function nameFromCaptured(captured: Record<string, unknown> | null): string | un
     'name',
   ] as const) {
     const v = asTrimmedString(captured[key]);
-    if (v && !isPlaceholderTitle(v)) return shortLabel(v);
+    if (v && !isBadStoredCompanyName(v)) return shortLabel(v);
   }
 
   return nameFromIdeaText(asTrimmedString(captured.rawIdea));
@@ -149,7 +191,7 @@ export function deriveCompanyDisplayName(input: {
   handoffPayload?: unknown;
 }): string {
   const stored = asTrimmedString(input.companyName);
-  if (stored && !isPlaceholderTitle(stored)) return shortLabel(stored);
+  if (stored && !isBadStoredCompanyName(stored)) return shortLabel(stored);
 
   const captured =
     input.captured && typeof input.captured === 'object' && !Array.isArray(input.captured)
@@ -166,7 +208,7 @@ export function deriveCompanyDisplayName(input: {
   if (handoff) {
     for (const key of ['companyName', 'ventureName', 'title', 'profileLine'] as const) {
       const v = asTrimmedString(handoff[key]);
-      if (v && !isPlaceholderTitle(v) && v.length <= 80) return shortLabel(v);
+      if (v && !isBadStoredCompanyName(v) && v.length <= 80) return shortLabel(v);
     }
     const handoffIdea = nameFromIdeaText(asTrimmedString(handoff.rawIdea));
     if (handoffIdea) return handoffIdea;
@@ -176,11 +218,11 @@ export function deriveCompanyDisplayName(input: {
   if (fromPrompt) return fromPrompt;
 
   const chatTitle = asTrimmedString(input.chatTitle);
-  if (chatTitle && !isPlaceholderTitle(chatTitle)) return shortLabel(chatTitle);
+  if (chatTitle && !isBadStoredCompanyName(chatTitle)) return shortLabel(chatTitle);
 
   return 'Untitled company';
 }
 
 export function isPlaceholderChatTitle(title: string | undefined | null): boolean {
-  return isPlaceholderTitle(asTrimmedString(title ?? undefined));
+  return isBadStoredCompanyName(asTrimmedString(title ?? undefined));
 }

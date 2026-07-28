@@ -7,7 +7,7 @@ import {
 } from '@/src/lib/convexServer';
 import {
   appendSwarmGuardrailsToIgnitionPrompt,
-  buildDefaultSwarmAgents,
+  buildSwarmAgentsForPrompt,
 } from '@/src/lib/orchestrationSwarmGuardrails';
 import { startOpenClawSessionStream } from '@/src/lib/openclawWsClient';
 import { resolveOpenClawAllowedBridgeUrl, resolveOpenClawBridgeUrl } from '@/src/lib/openclawBridgeEnv';
@@ -25,7 +25,18 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-export type OpenClawSpawnSource = 'manual_prompt' | 'venice_ignition_draft' | 'form_opportunity';
+export type OpenClawSpawnSource =
+  | 'manual_prompt'
+  /** Generate opportunities (RAG / curated cards) → deploy */
+  | 'rag_opportunity'
+  /** Build from my idea → Form wizard → deploy */
+  | 'form_intake'
+  /** Build from my idea → Venice chat → deploy */
+  | 'chat_intake'
+  /** @deprecated Prefer rag_opportunity | form_intake */
+  | 'form_opportunity'
+  /** @deprecated Prefer chat_intake */
+  | 'venice_ignition_draft';
 
 export type RunOpenClawSpawnOk = {
   ok: true;
@@ -48,6 +59,9 @@ export type RunOpenClawSpawnResult = RunOpenClawSpawnOk | RunOpenClawSpawnErr;
 /**
  * Creates an orchestration session, opens the gateway stream, POSTs the prompt to the OpenClaw bridge,
  * and links the chat ignition draft on success.
+ *
+ * Runtime/VPS integration boundary. Keep React clients behind this server-side
+ * adapter and evolve its contract per docs/CONTRATOS_INTEGRACION_FLUJOS.md.
  */
 export async function runOpenClawSpawn(args: {
   organizationId: string;
@@ -209,7 +223,10 @@ export async function runOpenClawSpawn(args: {
   });
 
   try {
-    await upsertOrchestrationAgents({ sessionId, agents: buildDefaultSwarmAgents() });
+    await upsertOrchestrationAgents({
+      sessionId,
+      agents: buildSwarmAgentsForPrompt(prompt),
+    });
   } catch {
     /* seeding agents is best-effort */
   }

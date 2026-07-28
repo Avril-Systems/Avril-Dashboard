@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Wallet } from 'lucide-react';
 import { useWaaP } from '@/src/components/WaaPProvider';
 import { signInWithWallet } from '@/src/lib/establishWalletSession';
@@ -27,6 +27,9 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
   const [ideaId, setIdeaId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const ideaIdRef = useRef<string | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   const saveSelection = useCallback(async () => {
     const res = await fetch('/api/founder/luck-intake', {
@@ -43,36 +46,10 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     if (!res.ok || !data.ok || !data.ideaId) {
       throw new Error(data.error?.message || 'Could not link your selection to your account.');
     }
+    ideaIdRef.current = data.ideaId;
     setIdeaId(data.ideaId);
     return data.ideaId;
   }, [opportunity]);
-
-  const resumeFromSession = useCallback(async () => {
-    const session = await refreshWalletSession();
-    if (!session) {
-      setPhase('sign-in');
-      return;
-    }
-
-    if (session.luckIdeaId) {
-      setIdeaId(session.luckIdeaId);
-      if (session.plan) {
-        onComplete(session.luckIdeaId);
-      } else {
-        setPhase('payment');
-      }
-      return;
-    }
-
-    setPhase('linking');
-    try {
-      await saveSelection();
-      setPhase('payment');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save selection');
-      setPhase('sign-in');
-    }
-  }, [saveSelection, onComplete, refreshWalletSession]);
 
   useEffect(() => {
     persistLuckSelection(opportunity);
@@ -80,8 +57,41 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
 
   useEffect(() => {
     if (!isReady) return;
-    void resumeFromSession();
-  }, [isReady, resumeFromSession]);
+    let cancelled = false;
+
+    async function resume() {
+      const session = await refreshWalletSession();
+      if (cancelled) return;
+      if (!session) {
+        setPhase('sign-in');
+        return;
+      }
+
+      setPhase('linking');
+      try {
+        const freshIdeaId = await saveSelection();
+        if (cancelled) return;
+        // TODO(billing): session.plan is a demo shortcut, not a reusable deploy entitlement.
+        // Production rule: one company deploy = one deploymentIntent + one checkout.
+        // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
+        if (session.plan) {
+          onCompleteRef.current(freshIdeaId);
+        } else {
+          setPhase('payment');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to save selection');
+          setPhase('sign-in');
+        }
+      }
+    }
+
+    void resume();
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, opportunity.id, saveSelection, refreshWalletSession]);
 
   async function handleSignIn() {
     setBusy(true);
@@ -101,10 +111,14 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     }
   }
 
-  function handlePaymentComplete() {
+  async function handlePaymentComplete() {
     clearPersistedLuckSelection();
-    if (ideaId) {
-      onComplete(ideaId);
+    try {
+      const id = ideaIdRef.current ?? (await saveSelection());
+      onCompleteRef.current(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not continue after payment');
+      setPhase('payment');
     }
   }
 
@@ -126,7 +140,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
         companyName={opportunity.name}
         flowSource={flowSource}
         ideaId={ideaId ?? undefined}
-        onComplete={handlePaymentComplete}
+        onComplete={() => void handlePaymentComplete()}
       />
     );
   }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, rejectLargePayload, requireDashboardToken } from '@/src/lib/apiSecurity';
 import { getChatIgnitionDraft, getDefaultOrganizationId } from '@/src/lib/convexServer';
 import { runOpenClawSpawn } from '@/src/lib/runOpenClawSpawn';
+import { deriveCompanyDisplayName } from '@/convex/lib/companyDisplayName';
 
 type HandoffBody = {
   chatId?: string;
@@ -36,6 +37,9 @@ export async function POST(req: Request) {
       );
     }
 
+    // TODO(billing): AI Chat currently reaches spawn without checkout.
+    // Require and atomically consume a paid deploymentIntent before runOpenClawSpawn.
+    // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
     const draft = await getChatIgnitionDraft({ chatId });
 
     if (draft?.status === 'spawned' && draft.spawnSessionId) {
@@ -96,23 +100,13 @@ export async function POST(req: Request) {
     const draftCompany =
       draft && typeof draft === 'object'
         ? (() => {
-            const captured =
-              'captured' in draft && draft.captured && typeof draft.captured === 'object'
-                ? (draft.captured as Record<string, unknown>)
-                : null;
-            const handoff =
-              'handoffPayload' in draft &&
-              draft.handoffPayload &&
-              typeof draft.handoffPayload === 'object'
-                ? (draft.handoffPayload as Record<string, unknown>)
-                : null;
-            const fromCaptured =
-              (typeof captured?.companyName === 'string' && captured.companyName.trim()) ||
-              (typeof captured?.rawIdea === 'string' && captured.rawIdea.trim()) ||
-              '';
-            const fromHandoff =
-              (typeof handoff?.companyName === 'string' && handoff.companyName.trim()) || '';
-            return (fromCaptured || fromHandoff).slice(0, 80) || undefined;
+            const name = deriveCompanyDisplayName({
+              companyName: undefined,
+              captured: 'captured' in draft ? draft.captured : undefined,
+              handoffPayload: 'handoffPayload' in draft ? draft.handoffPayload : undefined,
+              ignitionPrompt: prompt,
+            });
+            return name !== 'Untitled company' ? name.slice(0, 80) : undefined;
           })()
         : undefined;
 
@@ -121,7 +115,7 @@ export async function POST(req: Request) {
       chatId,
       prompt,
       companyName: draftCompany,
-      source: 'venice_ignition_draft',
+      source: 'chat_intake',
     });
 
     if (!result.ok) {
@@ -142,7 +136,7 @@ export async function POST(req: Request) {
       spawnRequestId: result.spawnRequestId,
       vpsRef: result.vpsRef,
       containerRef: result.containerRef,
-      handoffSource: 'venice_ignition_draft',
+      handoffSource: 'chat_intake',
     });
   } catch (err) {
     return NextResponse.json(

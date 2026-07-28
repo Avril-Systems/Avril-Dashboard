@@ -3,7 +3,9 @@ import { v } from 'convex/values';
 import { areaValidator, subAreaValidator } from './lib/agentAreas';
 
 export default defineSchema({
-  users: defineTable({ email: v.string(), walletAddress: v.optional(v.string()), createdAt: v.string() }).index('by_email', ['email']),
+  users: defineTable({ email: v.string(), walletAddress: v.optional(v.string()), createdAt: v.string() })
+    .index('by_email', ['email'])
+    .index('by_wallet', ['walletAddress']),
   organizations: defineTable({ name: v.string(), slug: v.string(), createdAt: v.string() }).index('by_slug', ['slug']),
   memberships: defineTable({ userId: v.id('users'), organizationId: v.id('organizations'), role: v.union(v.literal('owner'), v.literal('admin'), v.literal('operator'), v.literal('viewer')) }).index('by_org_user', ['organizationId', 'userId']),
   agents: defineTable({
@@ -67,6 +69,8 @@ export default defineSchema({
   founderIdeas: defineTable({
     organizationId: v.id('organizations'),
     founderUserId: v.optional(v.id('users')),
+    /** Denormalized wallet for luck-flow lookups (also on users.walletAddress). */
+    founderWallet: v.optional(v.string()),
     title: v.string(),
     ideaText: v.string(),
     targetUser: v.optional(v.string()),

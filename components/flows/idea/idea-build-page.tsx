@@ -21,7 +21,7 @@ import { buildOpportunityFromWizard } from '@/components/flows/luck/mock-data';
 import type { Opportunity } from '@/components/flows/luck/types';
 import { useWaaP } from '@/src/components/WaaPProvider';
 import { signInWithWallet } from '@/src/lib/establishWalletSession';
-import { rememberOfficeSessionId } from '@/src/lib/officeSessionMemory';
+import { useSpawnFromOpportunity } from '@/src/hooks/useSpawnFromOpportunity';
 import {
   clearFlowDraft,
   clearIdeaIntakeDrafts,
@@ -67,14 +67,27 @@ function IdeaBuildPageContent() {
   const [signingIn, setSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
   const [flowReady, setFlowReady] = useState(false);
-  const [spawnedSessionId, setSpawnedSessionId] = useState<string | null>(null);
-  const [spawnError, setSpawnError] = useState<string | null>(null);
+  const [creatingIdeaId, setCreatingIdeaId] = useState<string | null>(null);
 
   const authHeaders = useMemo<Record<string, string>>(() => {
     const headers: Record<string, string> = {};
     if (DASHBOARD_TOKEN) headers['x-dashboard-token'] = DASHBOARD_TOKEN;
     return headers;
   }, []);
+
+  const handleDeployComplete = useCallback((ideaId: string) => {
+    setLinkedIdeaId(ideaId);
+    setCreatingIdeaId(ideaId);
+    setFormStep('creating');
+  }, []);
+
+  const { spawnedSessionId, spawnError } = useSpawnFromOpportunity({
+    active: formStep === 'creating',
+    opportunity,
+    ideaId: creatingIdeaId,
+    authHeaders,
+    intakeSource: 'form_intake',
+  });
 
   useEffect(() => {
     const draft = readFlowDraft();
@@ -128,6 +141,7 @@ function IdeaBuildPageContent() {
     setFormStep('wizard');
     setOpportunity(null);
     setLinkedIdeaId(null);
+    setCreatingIdeaId(null);
     setGenerateError(null);
     setLoadingIndex(0);
   }, []);
@@ -144,6 +158,7 @@ function IdeaBuildPageContent() {
       setFormStep('loading');
 
       const context = [
+        `Company: ${answers.companyName}`,
         `Founder: ${answers.founderName}`,
         `Country: ${answers.country}`,
         `Language: ${answers.language}`,
@@ -200,47 +215,6 @@ function IdeaBuildPageContent() {
     }, 700);
     return () => window.clearInterval(id);
   }, [formStep, i.loading]);
-
-  // Form → Agent Office: create chat + orchestration session under the idea name.
-  useEffect(() => {
-    if (formStep !== 'creating' || !opportunity) return;
-    let cancelled = false;
-
-    async function spawnOffice() {
-      setSpawnError(null);
-      try {
-        const res = await fetch('/api/orchestration/spawn-from-opportunity', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({
-            opportunity,
-            ideaId: linkedIdeaId ?? undefined,
-          }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          sessionId?: string;
-          error?: { message?: string };
-        };
-        if (cancelled) return;
-        if (!res.ok || !data.sessionId) {
-          setSpawnError(data.error?.message || 'Could not open Agent Office for this company.');
-          return;
-        }
-        setSpawnedSessionId(data.sessionId);
-        rememberOfficeSessionId(data.sessionId);
-      } catch (err) {
-        if (!cancelled) {
-          setSpawnError(err instanceof Error ? err.message : 'Spawn failed');
-        }
-      }
-    }
-
-    void spawnOffice();
-    return () => {
-      cancelled = true;
-    };
-  }, [formStep, opportunity, linkedIdeaId, authHeaders]);
 
   // Jump into the new office as soon as spawn returns.
   useEffect(() => {
@@ -375,7 +349,7 @@ function IdeaBuildPageContent() {
               />
             </GlassPanel>
           ) : (
-            <AnimatedAIChat initialViewMode="chat" hideModeToggle hideHeader variant="marketing" />
+            <AnimatedAIChat initialViewMode="chat" hideModeToggle hideHeader variant="marketing" hideFolder />
           )}
         </div>
       </FlowShell>
@@ -444,6 +418,7 @@ function IdeaBuildPageContent() {
                   onBack={() => setFormStep('wizard')}
                   onDeploy={() => setFormStep('deploy')}
                   showBack
+                  useNavbarGlassBackground
                 />
               </motion.div>
             )}
@@ -458,10 +433,7 @@ function IdeaBuildPageContent() {
                     clearFlowDraft();
                     resetFormFlow();
                   }}
-                  onComplete={(ideaId) => {
-                    setLinkedIdeaId(ideaId);
-                    setFormStep('creating');
-                  }}
+                  onComplete={handleDeployComplete}
                 />
               </motion.div>
             )}
@@ -478,7 +450,11 @@ function IdeaBuildPageContent() {
                     <p className="text-xs text-rose-300">{spawnError}</p>
                     <MarketingBrandButton
                       label="Open Agent Office anyway"
-                      href="/agents/office"
+                      href={
+                        spawnedSessionId
+                          ? `/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`
+                          : '/agents/office'
+                      }
                       className="mx-auto"
                     />
                     <button
@@ -508,10 +484,10 @@ function IdeaBuildPageContent() {
                 <FlowDashboard
                   companyName={opportunity.name}
                   ideaId={linkedIdeaId ?? undefined}
+                  sessionId={spawnedSessionId ?? undefined}
                   onRestart={() => {
                     clearAllDrafts();
-                    setSpawnedSessionId(null);
-                    setSpawnError(null);
+                    setCreatingIdeaId(null);
                     setEntryMode(null);
                   }}
                 />

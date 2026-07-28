@@ -11,9 +11,16 @@ type BlueprintPreviewProps = {
   onBack: () => void;
   onDeploy: () => void;
   showBack?: boolean;
+  useNavbarGlassBackground?: boolean;
 };
 
-export function BlueprintPreview({ opportunity, onBack, onDeploy, showBack = true }: BlueprintPreviewProps) {
+export function BlueprintPreview({
+  opportunity,
+  onBack,
+  onDeploy,
+  showBack = true,
+  useNavbarGlassBackground = false,
+}: BlueprintPreviewProps) {
   const { t } = useLanguage();
   const b = t.flow.blueprint;
   const { blueprint } = opportunity;
@@ -36,7 +43,13 @@ export function BlueprintPreview({ opportunity, onBack, onDeploy, showBack = tru
         </button>
       )}
 
-      <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-surface/60 backdrop-blur-xl">
+      <div
+        className={`relative overflow-hidden rounded-2xl border border-border/70 ${
+          useNavbarGlassBackground
+            ? 'bg-[rgba(0,0,0,0.95)] backdrop-blur-[20px]'
+            : 'bg-surface/60 backdrop-blur-xl'
+        }`}
+      >
         <div className="relative space-y-8 p-6 md:p-10">
           <div className="space-y-3 text-center md:text-left">
             <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">{b.eyebrow}</p>

@@ -1,7 +1,8 @@
 'use client';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Menu } from 'lucide-react';
+import { Home, Menu } from 'lucide-react';
 import { useWaaP } from './WaaPProvider';
 import ThemePillarToggle from './ThemePillarToggle';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,7 @@ export default function Topbar({ menuOpen, onMenuToggle }: TopbarProps) {
     'Avril Dashboard';
   const { address, logout } = useWaaP();
   const [copied, setCopied] = useState(false);
+  const isHome = pathname === '/home' || pathname === '/';
 
   const handleCopy = async () => {
     if (!address) return;
@@ -46,17 +48,8 @@ export default function Topbar({ menuOpen, onMenuToggle }: TopbarProps) {
     }
   };
 
-  const isOffice = pathname.startsWith('/agents/office');
-
   return (
-    <header
-      className={cn(
-        'fixed top-0 left-0 right-0 z-[60] flex h-16 items-center justify-between px-4 md:px-6',
-        isOffice
-          ? 'border-b border-border/60 bg-background/80 backdrop-blur-md'
-          : 'glass-navbar'
-      )}
-    >
+    <header className="glass-navbar fixed top-0 left-0 right-0 z-[60] flex h-16 items-center justify-between px-4 md:px-6">
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -64,15 +57,24 @@ export default function Topbar({ menuOpen, onMenuToggle }: TopbarProps) {
           aria-label={menuOpen ? 'Close menu' : 'Open menu'}
           aria-expanded={menuOpen}
           aria-controls="nav-drawer"
-          className={cn(
-            'rounded-lg border p-2 transition-colors',
-            isOffice
-              ? 'border-border/60 text-muted-foreground hover:bg-surface/60 hover:text-foreground'
-              : 'border-white/10 text-muted hover:bg-white/10 hover:text-white smooth-transition'
-          )}
+          className="rounded-lg border border-white/10 p-2 text-muted hover:bg-white/10 hover:text-white smooth-transition"
         >
           <Menu className="w-5 h-5" strokeWidth={2} aria-hidden />
         </button>
+        {!isHome ? (
+          <Link
+            href="/home"
+            aria-label="Go to home"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5',
+              'text-xs font-heading text-muted transition-colors',
+              'hover:bg-white/10 hover:text-white smooth-transition',
+            )}
+          >
+            <Home className="h-3.5 w-3.5" aria-hidden />
+            <span className="hidden sm:inline">Home</span>
+          </Link>
+        ) : null}
         <h1 className="font-heading text-base font-semibold text-foreground">{title}</h1>
       </div>
 
@@ -82,26 +84,11 @@ export default function Topbar({ menuOpen, onMenuToggle }: TopbarProps) {
           {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Avril'}
         </span>
         {address && (
-          <button
-            onClick={() => void handleCopy()}
-            className={cn(
-              'rounded-full border px-3 py-1 text-xs font-heading transition-colors',
-              isOffice
-                ? 'border-border/60 text-muted-foreground hover:border-brand/30 hover:text-foreground'
-                : 'btn-ghost text-xs'
-            )}
-          >
+          <button onClick={() => void handleCopy()} className="btn-ghost text-xs">
             {copied ? 'Copied' : 'Copy address'}
           </button>
         )}
-        <button
-          onClick={() => void logout()}
-          className={cn(
-            isOffice
-              ? 'rounded-full border border-border/60 px-3 py-1 text-xs font-heading text-muted-foreground transition-colors hover:border-brand/30 hover:text-foreground'
-              : 'btn-ghost text-xs'
-          )}
-        >
+        <button onClick={() => void logout()} className="btn-ghost text-xs">
           Logout
         </button>
       </div>

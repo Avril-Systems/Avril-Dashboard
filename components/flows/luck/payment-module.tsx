@@ -50,6 +50,7 @@ export function PaymentModule({
           planId: selectedPlan,
           companyName,
           flowSource,
+          ideaId,
         }),
       });
       const data = (await res.json()) as {

@@ -21,6 +21,7 @@ export const createFounderIdeaServer = mutation({
   args: {
     organizationId: v.id('organizations'),
     founderUserId: v.optional(v.id('users')),
+    founderWallet: v.optional(v.string()),
     title: v.string(),
     ideaText: v.string(),
     targetUser: v.optional(v.string()),
@@ -45,6 +46,7 @@ export const createFounderIdeaServer = mutation({
     return await ctx.db.insert('founderIdeas', {
       organizationId: args.organizationId,
       founderUserId: args.founderUserId,
+      founderWallet: args.founderWallet?.trim().toLowerCase(),
       title: args.title.trim().slice(0, 120) || 'Untitled idea',
       ideaText: args.ideaText.trim(),
       targetUser: args.targetUser?.trim(),
