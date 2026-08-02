@@ -45,6 +45,25 @@ export const avrilShaderDefaults = {
   mobile: { speed: 0.65, scale: 0.68 },
 } as const;
 
+/** LiquidMetal hero shader defaults — Avril logo + brand tint */
+export const avrilLiquidMetalDefaults = {
+  image: '/Avril.png',
+  colorBack: '#ffffff00',
+  colorTint: avrilColors.brand,
+  repetition: 6,
+  softness: 0.8,
+  shiftRed: 1,
+  shiftBlue: -1,
+  distortion: 0.4,
+  contour: 0.4,
+  angle: 0,
+  speed: 0.9,
+  scale: 0.75,
+  fit: 'contain' as const,
+  desktop: { scale: 0.78, speed: 0.75 },
+  mobile: { speed: 0.65, scale: 0.68 },
+} as const;
+
 /** Jura-forward typography scale — matches dashboard `font-heading` usage */
 export const avrilTypography = {
   display: 'font-heading text-balance font-medium tracking-tight',
