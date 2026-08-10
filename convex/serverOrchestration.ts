@@ -50,6 +50,7 @@ export const createSessionServer = mutation({
     spawnRequestId: v.optional(v.string()),
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
+    endpointUrl: v.optional(v.string()),
     error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -86,6 +87,7 @@ export const createSessionServer = mutation({
       spawnRequestId: args.spawnRequestId,
       vpsRef: args.vpsRef,
       containerRef: args.containerRef,
+      endpointUrl: args.endpointUrl,
       error: args.error,
       createdAt: now,
       updatedAt: now,
@@ -101,6 +103,7 @@ export const setSessionStatusServer = mutation({
     spawnRequestId: v.optional(v.string()),
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
+    endpointUrl: v.optional(v.string()),
     error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -112,6 +115,7 @@ export const setSessionStatusServer = mutation({
       spawnRequestId: args.spawnRequestId,
       vpsRef: args.vpsRef,
       containerRef: args.containerRef,
+      endpointUrl: args.endpointUrl,
       error: args.error,
       updatedAt: new Date().toISOString(),
     });

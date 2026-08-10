@@ -36,7 +36,10 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opportunity }),
+      body: JSON.stringify({
+        opportunity,
+        intakeSource: flowSource === 'idea' ? 'form_intake' : 'rag_opportunity',
+      }),
     });
     const data = (await res.json()) as {
       ok?: boolean;
@@ -49,7 +52,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     ideaIdRef.current = data.ideaId;
     setIdeaId(data.ideaId);
     return data.ideaId;
-  }, [opportunity]);
+  }, [opportunity, flowSource]);
 
   useEffect(() => {
     persistLuckSelection(opportunity);
@@ -71,14 +74,11 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
       try {
         const freshIdeaId = await saveSelection();
         if (cancelled) return;
-        // TODO(billing): session.plan is a demo shortcut, not a reusable deploy entitlement.
+        // session.plan is informational UX metadata only — it must NEVER authorize
+        // a free deploy. Every company pays: one company = one checkout.
         // Production rule: one company deploy = one deploymentIntent + one checkout.
         // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
-        if (session.plan) {
-          onCompleteRef.current(freshIdeaId);
-        } else {
-          setPhase('payment');
-        }
+        setPhase('payment');
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to save selection');
@@ -140,6 +140,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
         companyName={opportunity.name}
         flowSource={flowSource}
         ideaId={ideaId ?? undefined}
+        opportunityId={flowSource === 'opportunity' ? opportunity.id : undefined}
         onComplete={() => void handlePaymentComplete()}
       />
     );

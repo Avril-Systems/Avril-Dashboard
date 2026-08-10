@@ -23,10 +23,10 @@ export const deployOpenClawInstance = action({
   args: { ideaId: v.optional(v.id('founderIdeas')) },
   handler: async (ctx, args) => {
     const serverSecret = requireServerSecret();
-    const organizationId = await ctx.runQuery((api as any).bootstrap.getDefaultOrganizationId, { serverSecret });
+    const organizationId: any = await ctx.runQuery((api as any).bootstrap.getDefaultOrganizationId, { serverSecret });
     if (!organizationId) throw new Error('No default organization found.');
 
-    const state = await ctx.runQuery((api as any).serverControlPlane.getControlPlaneStateServer, {
+    const state: any = await ctx.runQuery((api as any).serverControlPlane.getControlPlaneStateServer, {
       organizationId,
       serverSecret,
     });
@@ -42,7 +42,7 @@ export const deployOpenClawInstance = action({
       process.env.DEPLOYER_CALLBACK_SECRET ||
       `cb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
-    const deploymentJobId = await ctx.runMutation((api as any).serverDeployments.createDeploymentJobServer, {
+    const deploymentJobId: any = await ctx.runMutation((api as any).serverDeployments.createDeploymentJobServer, {
       organizationId,
       ideaId: currentIdea._id,
       blueprintId: state.blueprint._id,
@@ -158,7 +158,7 @@ export const deployOpenClawInstance = action({
     if (deployerToken) {
       headers.Authorization = `Bearer ${deployerToken}`;
     }
-    const res = await fetch(deployerUrl, {
+    const res: Response = await fetch(deployerUrl, {
       method: 'POST',
       headers,
       body,

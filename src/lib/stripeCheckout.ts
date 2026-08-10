@@ -8,6 +8,8 @@ type CreateCheckoutSessionInput = {
   flowSource: string;
   origin: string;
   ideaId?: string;
+  /** RAG opportunity uuid (used by Launch POST /iniciar/{uuid}). */
+  opportunityId?: string;
   customerEmail?: string;
 };
 
@@ -50,6 +52,7 @@ export async function createStripeCheckoutSession(input: CreateCheckoutSessionIn
       companyName: input.companyName,
       flowSource: input.flowSource,
       ideaId: input.ideaId ?? '',
+      opportunityId: input.opportunityId ?? '',
     },
     allow_promotion_codes: true,
   };
@@ -76,5 +79,7 @@ export async function verifyStripeCheckoutSession(sessionId: string) {
     companyName: session.metadata?.companyName ?? '',
     planId: (session.metadata?.planId ?? '') as DeploymentPlanId | '',
     flowSource: session.metadata?.flowSource ?? 'marketing',
+    ideaId: session.metadata?.ideaId ?? '',
+    opportunityId: session.metadata?.opportunityId ?? '',
   };
 }

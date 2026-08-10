@@ -29,6 +29,8 @@ export async function GET(req: Request) {
       companyName: result.companyName,
       planId: result.planId,
       flowSource: result.flowSource,
+      ideaId: result.ideaId || null,
+      opportunityId: result.opportunityId || null,
       mode: result.session.mode,
       paymentStatus: result.session.payment_status,
       customerEmail: result.session.customer_details?.email ?? null,

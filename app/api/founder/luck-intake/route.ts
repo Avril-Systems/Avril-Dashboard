@@ -11,6 +11,8 @@ import type { Opportunity } from '@/components/flows/luck/types';
 
 type LuckIntakeBody = {
   opportunity?: Opportunity;
+  /** Product entry path — distinguishes RAG cards vs form wizard. */
+  intakeSource?: 'rag_opportunity' | 'form_intake';
 };
 
 export async function POST(req: Request) {
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
         { status: 429 }
       );
     }
-    if (rejectLargePayload(req, 48 * 1024)) {
+    if (rejectLargePayload(req, 256 * 1024)) {
       return NextResponse.json(
         { ok: false, error: { code: 'PAYLOAD_TOO_LARGE', message: 'Payload too large' } },
         { status: 413 }
@@ -67,7 +69,9 @@ export async function POST(req: Request) {
       riskTolerance: intake.riskTolerance,
     });
 
-    const token = refreshSessionToken(session, { luckIdeaId: String(ideaId) });
+    const token = refreshSessionToken(session, {
+      luckIdeaId: String(ideaId),
+    });
     if (!token) {
       return NextResponse.json(
         { ok: false, error: { code: 'SESSION_ERROR', message: 'Could not update session' } },

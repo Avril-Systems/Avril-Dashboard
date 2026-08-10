@@ -32,6 +32,7 @@ export default defineSchema({
     spawnRequestId: v.optional(v.string()),
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
+    endpointUrl: v.optional(v.string()),
     error: v.optional(v.string()),
     createdAt: v.string(),
     updatedAt: v.string(),

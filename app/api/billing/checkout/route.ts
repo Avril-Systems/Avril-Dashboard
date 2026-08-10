@@ -14,6 +14,7 @@ type CheckoutBody = {
   companyName?: string;
   flowSource?: string;
   ideaId?: string;
+  opportunityId?: string;
 };
 
 export async function GET() {
@@ -75,6 +76,7 @@ export async function POST(req: Request) {
         flowSource,
         origin,
         ideaId: linkedIdeaId,
+        opportunityId: body.opportunityId?.trim(),
       });
 
       const token = refreshSessionToken(session, { plan: plan.id, luckIdeaId: linkedIdeaId });

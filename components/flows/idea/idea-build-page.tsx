@@ -2,7 +2,6 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Network, Sparkles, Fingerprint, Lightbulb, MessageSquare } from 'lucide-react';
 import { FlowShell } from '@/components/flows/shared/flow-shell';
@@ -21,7 +20,6 @@ import { buildOpportunityFromWizard } from '@/components/flows/luck/mock-data';
 import type { Opportunity } from '@/components/flows/luck/types';
 import { useWaaP } from '@/src/components/WaaPProvider';
 import { signInWithWallet } from '@/src/lib/establishWalletSession';
-import { useSpawnFromOpportunity } from '@/src/hooks/useSpawnFromOpportunity';
 import {
   clearFlowDraft,
   clearIdeaIntakeDrafts,
@@ -54,7 +52,6 @@ type EntryMode = 'form' | 'chat';
 type FormStep = 'wizard' | 'loading' | 'blueprint' | 'deploy' | 'creating' | 'dashboard';
 
 function IdeaBuildPageContent() {
-  const router = useRouter();
   const { t, language } = useLanguage();
   const i = t.flow.idea;
   const { isReady, isAuthenticated, login, refreshWalletSession } = useWaaP();
@@ -80,14 +77,6 @@ function IdeaBuildPageContent() {
     setCreatingIdeaId(ideaId);
     setFormStep('creating');
   }, []);
-
-  const { spawnedSessionId, spawnError } = useSpawnFromOpportunity({
-    active: formStep === 'creating',
-    opportunity,
-    ideaId: creatingIdeaId,
-    authHeaders,
-    intakeSource: 'form_intake',
-  });
 
   useEffect(() => {
     const draft = readFlowDraft();
@@ -215,13 +204,6 @@ function IdeaBuildPageContent() {
     }, 700);
     return () => window.clearInterval(id);
   }, [formStep, i.loading]);
-
-  // Jump into the new office as soon as spawn returns.
-  useEffect(() => {
-    if (formStep !== 'creating' || !spawnedSessionId) return;
-    clearIdeaIntakeDrafts();
-    router.push(`/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`);
-  }, [formStep, spawnedSessionId, router]);
 
   if (!flowReady) {
     return (
@@ -440,42 +422,11 @@ function IdeaBuildPageContent() {
 
             {formStep === 'creating' && opportunity && (
               <motion.div key="creating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
-                {spawnError ? (
-                  <GlassPanel className="mx-auto max-w-md space-y-4 p-6 text-center">
-                    <h2 className="text-xl text-foreground">Almost there</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Your company <span className="text-brand">{opportunity.name}</span> was saved, but OpenClaw
-                      spawn failed.
-                    </p>
-                    <p className="text-xs text-rose-300">{spawnError}</p>
-                    <MarketingBrandButton
-                      label="Open Agent Office anyway"
-                      href={
-                        spawnedSessionId
-                          ? `/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`
-                          : '/agents/office'
-                      }
-                      className="mx-auto"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setFormStep('dashboard')}
-                      className="text-sm text-brand hover:underline"
-                    >
-                      Continue to summary
-                    </button>
-                  </GlassPanel>
-                ) : (
-                  <CompanyCreating
-                    companyName={opportunity.name}
-                    durationMs={12_000}
-                    onComplete={() => {
-                      // Spawn redirect handles success; if still pending, keep waiting via animation loop.
-                      if (!spawnedSessionId && !spawnError) return;
-                      if (!spawnedSessionId) setFormStep('dashboard');
-                    }}
-                  />
-                )}
+                <CompanyCreating
+                  companyName={opportunity.name}
+                  durationMs={12_000}
+                  onComplete={() => setFormStep('dashboard')}
+                />
               </motion.div>
             )}
 
@@ -484,7 +435,6 @@ function IdeaBuildPageContent() {
                 <FlowDashboard
                   companyName={opportunity.name}
                   ideaId={linkedIdeaId ?? undefined}
-                  sessionId={spawnedSessionId ?? undefined}
                   onRestart={() => {
                     clearAllDrafts();
                     setCreatingIdeaId(null);

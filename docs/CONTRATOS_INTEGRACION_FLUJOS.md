@@ -37,7 +37,7 @@ captura o selección
 - Un mismo usuario puede usar los tres caminos y pagar una vez por cada empresa desplegada.
 - Reintentar técnicamente el mismo deploy después de un fallo no debe cobrar de nuevo.
 
-Por lo tanto, `session.plan` y `luckIdeaId` no deben considerarse comprobantes reutilizables de pago.
+Por lo tanto, `session.plan` y `luckIdeaId` no deben considerarse comprobantes reutilizables de pago. Permanecen en la cookie únicamente como metadata de UX (p. ej. recordar el plan seleccionado para el próximo checkout) y nunca como autorización de un deploy gratis.
 
 ## Identificadores y responsabilidades
 
@@ -255,9 +255,9 @@ El estado de pago se guarda parcialmente en la cookie (`session.plan`, `luckIdea
 
 Además, en el modo Stripe actual:
 
-- `/api/billing/checkout` escribe `session.plan` al crear la sesión de Checkout, antes de recibir confirmación de pago;
+- `/api/billing/checkout` escribe `session.plan` al crear la sesión de Checkout, antes de recibir confirmación de pago. Desde el fix "Plan A", este valor es solo metadata informativa de UX: `DeployGate` ya no lo consulta para saltarse el checkout;
 - `/billing/success` verifica la sesión, pero no reanuda el spawn correspondiente;
-- por lo tanto, iniciar checkout puede dejar una autorización prematura y completar checkout puede dejar la empresa sin desplegar.
+- por lo tanto, completar checkout puede dejar la empresa sin desplegar.
 
 Estos comportamientos son válidos únicamente como scaffolding de demo. No deben habilitarse para cobros reales.
 
@@ -299,7 +299,7 @@ Reglas:
 
 ### Gap actual que debe corregirse
 
-En `DeployGate`, la rama que usa `session.plan` puede saltarse el checkout para empresas posteriores. Debe eliminarse cuando se implemente `deploymentIntents`.
+En `DeployGate`, la rama que usaba `session.plan` para saltarse el checkout de empresas posteriores **ya fue eliminada** (Plan A): toda empresa pasa por checkout nuevo. El gap restante es que `spawn-from-opportunity` aún no exige una intención pagada; se corrige al implementar `deploymentIntents`.
 
 En el camino AI Chat debe agregarse checkout antes de `handoff-openclaw`.
 
@@ -427,7 +427,7 @@ src/lib/orchestrationDemoScope.ts
 - agregar `deploymentIntents`;
 - asociar Stripe a cada intención;
 - implementar webhook e idempotencia;
-- quitar el uso de `session.plan` como autorización global;
+- quitar el uso de `session.plan` como autorización global — **parcialmente completado** (Plan A): la rama de `DeployGate` que saltaba el checkout fue eliminada y `session.plan` quedó como metadata de UX; falta la entidad `deploymentIntents` + webhook para la verificación server-side por empresa;
 - insertar checkout en AI Chat;
 - exigir intención pagada en ambos endpoints de spawn.
 

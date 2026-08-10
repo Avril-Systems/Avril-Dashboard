@@ -34,14 +34,14 @@ export const summarizeNextChat = action({
       return { ok: false, reason: 'OPENAI_API_KEY not set; summarization skipped' };
     }
 
-    const organizationId = await ctx.runQuery(api.bootstrap.getDefaultOrganizationId, {
+    const organizationId: any = await ctx.runQuery(api.bootstrap.getDefaultOrganizationId, {
       serverSecret,
     });
     if (!organizationId) {
       return { ok: false, reason: 'No default organization' };
     }
 
-    const chats = await ctx.runQuery(api.serverChats.listChatsServer, {
+    const chats: any = await ctx.runQuery(api.serverChats.listChatsServer, {
       organizationId,
       serverSecret,
     });
@@ -52,7 +52,7 @@ export const summarizeNextChat = action({
     const now = Date.now();
     for (const chat of chats) {
       const chatId = chat._id;
-      const count = await ctx.runQuery(api.serverChats.getMessageCountServer, {
+      const count: any = await ctx.runQuery(api.serverChats.getMessageCountServer, {
         chatId,
         serverSecret,
       });
@@ -64,7 +64,7 @@ export const summarizeNextChat = action({
         if (now - updated < SUMMARY_MAX_AGE_MS) continue;
       }
 
-      const messages = await ctx.runQuery(api.serverChats.listMessagesServer, {
+      const messages: any = await ctx.runQuery(api.serverChats.listMessagesServer, {
         chatId,
         serverSecret,
       });
@@ -82,7 +82,7 @@ export const summarizeNextChat = action({
 
       let summary: string;
       try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res: Response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

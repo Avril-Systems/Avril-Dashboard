@@ -27,6 +27,7 @@ type Session = {
   spawnRequestId?: string;
   vpsRef?: string;
   containerRef?: string;
+  endpointUrl?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -440,6 +441,19 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
               </DebugStat>
               <DebugStat label="Raw Agent Count (Convex)">{agents.length}</DebugStat>
             </div>
+            {session?.endpointUrl && (
+              <div className="mt-2 truncate">
+                <p className="text-[11px] font-heading uppercase tracking-[0.12em] text-muted-foreground">Runtime URL</p>
+                <a
+                  href={session.endpointUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-brand underline-offset-2 hover:underline"
+                >
+                  {session.endpointUrl}
+                </a>
+              </div>
+            )}
           </GlassPanel>
         )}
       </header>

@@ -159,6 +159,7 @@ export async function createOrchestrationSession(args: {
   spawnRequestId?: string;
   vpsRef?: string;
   containerRef?: string;
+  endpointUrl?: string;
   error?: string;
 }) {
   const client = getClient();
@@ -173,6 +174,7 @@ export async function createOrchestrationSession(args: {
     spawnRequestId: args.spawnRequestId,
     vpsRef: args.vpsRef,
     containerRef: args.containerRef,
+    endpointUrl: args.endpointUrl,
     error: args.error,
     serverSecret,
   });
@@ -184,6 +186,7 @@ export async function setOrchestrationSessionStatus(args: {
   spawnRequestId?: string;
   vpsRef?: string;
   containerRef?: string;
+  endpointUrl?: string;
   error?: string;
 }) {
   const client = getClient();
@@ -195,6 +198,7 @@ export async function setOrchestrationSessionStatus(args: {
     spawnRequestId: args.spawnRequestId,
     vpsRef: args.vpsRef,
     containerRef: args.containerRef,
+    endpointUrl: args.endpointUrl,
     error: args.error,
     serverSecret,
   });

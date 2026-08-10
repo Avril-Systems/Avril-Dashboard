@@ -15,6 +15,7 @@ type PaymentModuleProps = {
   companyName: string;
   flowSource?: 'opportunity' | 'idea';
   ideaId?: string;
+  opportunityId?: string;
   onComplete: () => void;
 };
 
@@ -22,6 +23,7 @@ export function PaymentModule({
   companyName,
   flowSource = 'opportunity',
   ideaId,
+  opportunityId,
   onComplete,
 }: PaymentModuleProps) {
   const { t, language } = useLanguage();
@@ -51,6 +53,7 @@ export function PaymentModule({
           companyName,
           flowSource,
           ideaId,
+          opportunityId,
         }),
       });
       const data = (await res.json()) as {
