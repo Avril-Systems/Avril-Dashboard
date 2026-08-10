@@ -23,7 +23,7 @@ export function MarketingHero() {
   const h = t.hero;
 
   return (
-    <SectionBackdrop variant="hero" className="pb-20 bg-[var(--avril-canvas)]">
+    <SectionBackdrop variant="hero" className="bg-[var(--avril-canvas)] pb-20">
       <HeroHeatmapRoot
         className="relative z-10 pt-28 md:pt-32"
         srTitle={h.srTitle}

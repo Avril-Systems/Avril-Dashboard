@@ -3,6 +3,8 @@
 import { Radar, Sparkles, Rocket } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { GlassPanel } from '@/components/patterns/glass-panel';
+import { LiquidMetalShape } from '@/components/ui/liquid-metal-shape';
+import { avrilColors } from '@/lib/avril-tokens';
 
 const PILLAR_ICONS = [Radar, Sparkles, Rocket];
 
@@ -11,8 +13,16 @@ export function MarketingThreePillars() {
   const p = t.pillars;
 
   return (
-    <section id="pillars" className="border-b border-border bg-background py-16 md:py-20">
-      <div className="mx-auto max-w-7xl px-6">
+    <section id="pillars" className="relative overflow-hidden border-b border-border bg-background py-16 md:py-20">
+      <LiquidMetalShape
+        variant="orbs"
+        className="absolute -right-16 top-1/2 hidden h-[420px] w-[220px] -translate-y-1/2 opacity-70 lg:block xl:-right-8 xl:h-[480px] xl:w-[260px]"
+        colorTint={avrilColors.brand}
+        speed={0.55}
+        scale={0.78}
+      />
+
+      <div className="relative z-10 mx-auto max-w-7xl px-6">
         <div className="mb-10 text-center md:mb-12">
           <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">{p.label}</p>
           <h2 className="mt-2 text-3xl tracking-tight md:text-4xl">{p.title}</h2>

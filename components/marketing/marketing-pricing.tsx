@@ -2,14 +2,26 @@
 
 import { useLanguage } from './language-context';
 import { GlassPanel } from '@/components/patterns/glass-panel';
+import { LiquidMetalShape } from '@/components/ui/liquid-metal-shape';
+import { avrilColors } from '@/lib/avril-tokens';
 
 export function MarketingPricing() {
   const { t } = useLanguage();
   const p = t.pricing;
 
   return (
-    <section id="pricing" className="border-b border-border bg-[var(--avril-canvas)] py-16 md:py-20">
-      <div className="mx-auto max-w-7xl px-6">
+    <section id="pricing" className="relative overflow-hidden border-b border-border bg-[var(--avril-canvas)] py-16 md:py-20">
+      <LiquidMetalShape
+        variant="diamond"
+        className="absolute -left-20 top-8 hidden h-[280px] w-[280px] opacity-60 lg:block xl:left-0"
+        colorTint={avrilColors.shaderBlue}
+        speed={0.45}
+        scale={0.7}
+        distortion={0.4}
+        contour={0.45}
+      />
+
+      <div className="relative z-10 mx-auto max-w-7xl px-6">
         <div className="mb-10 text-center md:mb-12">
           <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">{p.label}</p>
           <h2 className="mt-2 text-3xl tracking-tight md:text-4xl">{p.title}</h2>

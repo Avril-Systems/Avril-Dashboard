@@ -99,6 +99,20 @@
   --color-surface-overlay: var(--surface-overlay);
   --color-muted-foreground: hsl(var(--muted-foreground));
 
+  /* shadcn/ui semantic tokens (do not override --color-accent — app uses indigo) */
+  --color-primary: var(--brand);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--surface-raised);
+  --color-secondary-foreground: hsl(var(--foreground));
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-accent-foreground: hsl(var(--foreground));
+  --color-input: hsl(var(--border));
+  --color-ring: hsl(var(--ring));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-ring-offset-background: hsl(var(--background));
+
   /* Fonts */
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-heading: "Jura", sans-serif;
