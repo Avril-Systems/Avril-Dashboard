@@ -61,7 +61,7 @@ const RISK_OPTIONS: Array<{ value: WizardAnswers["riskTolerance"]; label: string
   { value: "balanced", label: "Balanced", desc: "Ship weekly, iterate fast" },
   { value: "ambitious", label: "Ambitious", desc: "Move fast, parallel bets" },
 ];
-const AUTO_OPTIONS = ["Full auto — humans only for exceptions", "Mostly auto + human review", "Human-led, AI assists", "Minimal automation"];
+const AUTO_OPTIONS = ["Full auto — humans only for exceptions", "Mostly auto + human review", "Human-led — AI assists", "Minimal automation"];
 const CHANNEL_OPTIONS = ["Twitter / X", "LinkedIn", "Product Hunt", "Cold email", "SEO / content", "Paid ads", "Community / Discord", "Referrals", "Other"];
 
 /* ─── shared components ─── */
@@ -297,20 +297,29 @@ export function FounderWizard({ onGenerate, isGenerating = false }: FounderWizar
             <p className="text-xs leading-relaxed text-muted-foreground">
               {filledCount}/{Object.keys(answers).length} fields filled. Hit Generate to create your agent brief.
             </p>
-            <div className="space-y-1.5 rounded-xl border border-border/70 bg-surface/40 p-3 text-xs text-muted-foreground">
-              <ReviewLine label="Company" value={answers.companyName} />
-              <ReviewLine label="Idea" value={answers.rawIdea} />
-              <ReviewLine label="Problem" value={answers.problem} />
-              <ReviewLine label="Target user" value={answers.targetUser} />
-              <ReviewLine label="Founder" value={answers.founderName} />
-              <ReviewLine label="Market" value={[answers.country, answers.language].filter(Boolean).join(" · ")} />
-              <ReviewLine label="Time" value={answers.timeAvailable} />
-              <ReviewLine label="Skills" value={answers.skillsResources} />
-              <ReviewLine label="Monetization" value={answers.monetization} />
-              <ReviewLine label="Model" value={answers.businessModel} />
-              <ReviewLine label="Pace" value={answers.riskTolerance} />
-              <ReviewLine label="Automation" value={answers.automationLevel} />
-              <ReviewLine label="Channels" value={answers.channels} />
+<div className="space-y-4 rounded-xl border border-border/70 bg-surface/40 p-4 text-xs text-muted-foreground">
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand/80">Idea</p>
+                <ReviewLine label="Company" value={answers.companyName} />
+                <ReviewLine label="Idea" value={answers.rawIdea} />
+                <ReviewLine label="Problem" value={answers.problem} />
+                <ReviewLine label="Target user" value={answers.targetUser} />
+              </div>
+              <div className="space-y-1.5 border-t border-border/50 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand/80">About you</p>
+                <ReviewLine label="Founder" value={answers.founderName} />
+                <ReviewLine label="Market" value={[answers.country, answers.language].filter(Boolean).join(" · ")} />
+                <ReviewLine label="Time" value={answers.timeAvailable} />
+                <ReviewLine label="Skills" value={answers.skillsResources} />
+              </div>
+              <div className="space-y-1.5 border-t border-border/50 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand/80">Economics & execution</p>
+                <ReviewLine label="Monetization" value={answers.monetization} />
+                <ReviewLine label="Model" value={answers.businessModel} />
+                <ReviewLine label="Pace" value={answers.riskTolerance} />
+                <ReviewLine label="Automation" value={answers.automationLevel} />
+                <ReviewLine label="Channels" value={answers.channels} />
+              </div>
             </div>
             {isGenerating && (
               <motion.div

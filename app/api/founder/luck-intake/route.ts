@@ -47,25 +47,33 @@ export async function POST(req: Request) {
     }
 
     const intake = opportunityToIntake(opportunity);
+
+    // 🚧 TEMP BYPASS — SOLO PARA VER DISEÑO EN LOCAL, sin Convex configurado. BORRAR ANTES DE COMMIT/PUSH.
     let founderUserId: string | undefined;
-    try {
-      founderUserId = await ensureWalletUser(session.address);
-    } catch {
-      // Best-effort wallet link — intake still proceeds for demo spawn.
+    let ideaId: string;
+    if (!process.env.NEXT_PUBLIC_CONVEX_URL && process.env.NODE_ENV !== 'production') {
+      ideaId = `design-preview-${Date.now()}`;
+    } else {
+      try {
+        founderUserId = await ensureWalletUser(session.address);
+      } catch {
+        // Best-effort wallet link — intake still proceeds for demo spawn.
+      }
+      ideaId = await createFounderIdea({
+        founderUserId,
+        founderWallet: session.address,
+        title: intake.title,
+        ideaText: intake.rawIdea,
+        targetUser: intake.targetUser,
+        problem: intake.problem,
+        monetizationPreference: intake.monetizationPreference,
+        businessModelPreference: intake.businessModelPreference,
+        desiredAutomationLevel: intake.desiredAutomationLevel,
+        channelPreferences: intake.channelPreferences,
+        riskTolerance: intake.riskTolerance,
+      });
     }
-    const ideaId = await createFounderIdea({
-      founderUserId,
-      founderWallet: session.address,
-      title: intake.title,
-      ideaText: intake.rawIdea,
-      targetUser: intake.targetUser,
-      problem: intake.problem,
-      monetizationPreference: intake.monetizationPreference,
-      businessModelPreference: intake.businessModelPreference,
-      desiredAutomationLevel: intake.desiredAutomationLevel,
-      channelPreferences: intake.channelPreferences,
-      riskTolerance: intake.riskTolerance,
-    });
+    // 🚧 FIN TEMP BYPASS
 
     const token = refreshSessionToken(session, { luckIdeaId: String(ideaId) });
     if (!token) {

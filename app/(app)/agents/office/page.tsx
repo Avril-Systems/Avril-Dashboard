@@ -15,6 +15,7 @@ import { avrilTypography } from '@/lib/avril-tokens';
 import { cn } from '@/lib/utils';
 import { readLastOfficeSessionId, rememberOfficeSessionId } from '@/src/lib/officeSessionMemory';
 import { ORCHESTRATION_DEMO_SHARED_ORG } from '@/src/lib/orchestrationDemoScope';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
 
@@ -287,7 +288,32 @@ function OfficeEmptyState({
     </div>
   );
 }
-
+// 🚧 TEMP MOCK DATA — SOLO PARA VER DISEÑO SIN CONVEX. BORRAR ANTES DE COMMIT/PUSH.
+const DESIGN_PREVIEW_SESSION: Session = {
+  _id: 'design-preview',
+  chatId: 'design-preview-chat',
+  companyName: 'Mycoseta (design preview)',
+  status: 'active',
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+const DESIGN_PREVIEW_AGENTS: Agent[] = [
+  { _id: 'a1', agentKey: 'ava', name: 'Ava — Ops Lead', role: 'Operations', status: 'working' },
+  { _id: 'a2', agentKey: 'ben', name: 'Ben — Growth', role: 'Growth', status: 'idle', parentAgentKey: 'ava' },
+  { _id: 'a3', agentKey: 'cleo', name: 'Cleo — Support', role: 'Support', status: 'blocked', parentAgentKey: 'ava' },
+  { _id: 'a4', agentKey: 'drew', name: 'Drew — Finance', role: 'Finance', status: 'completed' },
+  { _id: 'a5', agentKey: 'erin', name: 'Erin — Research', role: 'Market research & data gathering', status: 'working', parentAgentKey: 'drew' },
+  { _id: 'a6', agentKey: 'finn', name: 'Finn — QA', role: 'Quality checks & compliance', status: 'idle', parentAgentKey: 'drew' },
+  { _id: 'a7', agentKey: 'gia', name: 'Gia — Content', role: 'Content creation & comms', status: 'working' },
+  { _id: 'a8', agentKey: 'hugo', name: 'Hugo — Partnerships', role: 'Distribution & partnerships', status: 'idle', parentAgentKey: 'gia' },
+  { _id: 'a9', agentKey: 'iris', name: 'Iris — Metrics', role: 'Metrics, KPI tracking & reporting', status: 'error', parentAgentKey: 'gia' },
+];
+const DESIGN_PREVIEW_EVENTS: EventItem[] = [
+  { _id: 'e1', type: 'agent.spawned', createdAt: new Date(Date.now() - 90_000).toISOString() },
+  { _id: 'e2', type: 'gateway.connected', createdAt: new Date(Date.now() - 60_000).toISOString() },
+  { _id: 'e3', type: 'agent.status.working', createdAt: new Date(Date.now() - 30_000).toISOString() },
+];
+// 🚧 FIN TEMP MOCK DATA
 function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<Session | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -309,8 +335,20 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
     setShowDebug(false);
   }, [sessionId]);
 
-  useEffect(() => {
+useEffect(() => {
     let active = true;
+
+    // 🚧 TEMP BYPASS — BORRAR ANTES DE COMMIT/PUSH.
+    if (sessionId === 'design-preview') {
+      setSession(DESIGN_PREVIEW_SESSION);
+      setAgents(DESIGN_PREVIEW_AGENTS);
+      setEvents(DESIGN_PREVIEW_EVENTS);
+      setStatusMessage('');
+      return () => {
+        active = false;
+      };
+    }
+    // 🚧 FIN TEMP BYPASS
 
     async function loadState() {
       try {
@@ -459,21 +497,36 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
             <GlassPanel className="shrink-0 p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h4 className={cn(avrilTypography.card, 'text-sm')}>Agent Controls</h4>
-                {resolvedChatId && (
-                  <button
-                    type="button"
-                    onClick={() => setShowChat((v) => !v)}
-                    className={cn(
-                      'rounded-full border px-3 py-1 text-xs font-heading transition-colors',
-                      showChat
-                        ? 'border-brand/40 bg-brand/15 text-brand'
-                        : 'border-border/70 bg-surface/60 text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {showChat ? 'Hide Chat' : 'Chat'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowChat((v) => !v)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-heading transition-colors',
+                    showChat
+                      ? 'border-brand/40 bg-brand/15 text-brand'
+                      : 'border-border/70 bg-surface/60 text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {showChat ? 'Hide Timeline' : 'Timeline'}
+                </button>
               </div>
+
+             <AnimatePresence initial={false}>
+                {showChat && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 220, opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className="h-[220px] pb-3">
+                      <SessionTimeline events={events} />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {!selectedAgent && (
                 <p className="text-xs text-muted-foreground">
                   Select an agent in the map to inspect and control it.
@@ -504,7 +557,7 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
               )}
             </GlassPanel>
 
-            {showChat && resolvedChatId && (
+           {resolvedChatId && (
               <div className="shrink-0">
                 <OfficeAgentChat
                   agents={agents.map((a) => ({
@@ -520,9 +573,7 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
               </div>
             )}
 
-            <div className="flex h-[280px] shrink-0 flex-col">
-              <SessionTimeline events={events} />
-            </div>
+            
           </div>
         </div>
       </div>
@@ -533,7 +584,9 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
 function AgentOfficePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const sessionId = searchParams.get('sessionId')?.trim() || '';
+  const sessionId =
+    searchParams.get('sessionId')?.trim() ||
+    (process.env.NODE_ENV !== 'production' && !process.env.NEXT_PUBLIC_CONVEX_URL ? 'design-preview' : ''); // 🚧 TEMP — BORRAR
   const authHeaders = useAuthHeaders();
   const { sessions, loading, error } = useCompanySessions(authHeaders, sessionId);
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);

@@ -61,7 +61,7 @@ export function LiquidMetalShape({
   return (
     <div
       aria-hidden
-      className={cn('pointer-events-none relative overflow-hidden', className)}
+      className={cn('pointer-events-none overflow-hidden', className)}
       data-slot="liquid-metal-shape"
       data-variant={variant}
     >
