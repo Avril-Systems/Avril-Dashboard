@@ -51,6 +51,7 @@ export const createSessionServer = mutation({
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
     endpointUrl: v.optional(v.string()),
+    opportunityId: v.optional(v.string()),
     error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -88,6 +89,7 @@ export const createSessionServer = mutation({
       vpsRef: args.vpsRef,
       containerRef: args.containerRef,
       endpointUrl: args.endpointUrl,
+      opportunityId: args.opportunityId,
       error: args.error,
       createdAt: now,
       updatedAt: now,
@@ -110,15 +112,20 @@ export const setSessionStatusServer = mutation({
     requireServerSecret(args.serverSecret);
     requireEntity(await ctx.db.get(args.sessionId), 'Orchestration session');
 
-    await ctx.db.patch(args.sessionId, {
+    // Convex patch treats `undefined` as "delete field". Only include fields that were
+    // actually provided, otherwise spawnRequestId/vpsRef/endpointUrl get wiped on every
+    // status poll (breaking deployId resolution in /api/deploy/status).
+    const patch: Record<string, unknown> = {
       status: args.status,
-      spawnRequestId: args.spawnRequestId,
-      vpsRef: args.vpsRef,
-      containerRef: args.containerRef,
-      endpointUrl: args.endpointUrl,
-      error: args.error,
       updatedAt: new Date().toISOString(),
-    });
+    };
+    if (args.spawnRequestId !== undefined) patch.spawnRequestId = args.spawnRequestId;
+    if (args.vpsRef !== undefined) patch.vpsRef = args.vpsRef;
+    if (args.containerRef !== undefined) patch.containerRef = args.containerRef;
+    if (args.endpointUrl !== undefined) patch.endpointUrl = args.endpointUrl;
+    if (args.error !== undefined) patch.error = args.error;
+
+    await ctx.db.patch(args.sessionId, patch);
   },
 });
 
@@ -277,6 +284,23 @@ export const getSessionByChatServer = query({
       .withIndex('by_chat', (q) => q.eq('chatId', args.chatId))
       .collect();
     return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+  },
+});
+
+/** Latest orchestration session created for a RAG opportunity uuid (deploy dedup). */
+export const getSessionByOpportunityServer = query({
+  args: {
+    opportunityId: v.string(),
+    serverSecret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    const session = await ctx.db
+      .query('orchestrationSessions')
+      .withIndex('by_opportunityId', (q) => q.eq('opportunityId', args.opportunityId))
+      .order('desc')
+      .first();
+    return session ?? null;
   },
 });
 

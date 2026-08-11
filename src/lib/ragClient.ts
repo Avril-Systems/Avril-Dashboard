@@ -56,7 +56,7 @@ export async function fetchRandomBlueprints(): Promise<RagBlueprintRaw[]> {
   }
 
   const json = (await res.json()) as RagRandomResponse;
-  if (json.status !== 'success' || !Array.isArray(json.data) || json.data.length !== 3) {
+  if (json.status !== 'success' || !Array.isArray(json.data)) {
     throw new RagServiceError('RAG /random returned an unexpected shape', 'RAG_INVALID_RESPONSE', true);
   }
 

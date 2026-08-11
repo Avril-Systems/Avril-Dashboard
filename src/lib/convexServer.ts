@@ -160,6 +160,7 @@ export async function createOrchestrationSession(args: {
   vpsRef?: string;
   containerRef?: string;
   endpointUrl?: string;
+  opportunityId?: string;
   error?: string;
 }) {
   const client = getClient();
@@ -175,7 +176,18 @@ export async function createOrchestrationSession(args: {
     vpsRef: args.vpsRef,
     containerRef: args.containerRef,
     endpointUrl: args.endpointUrl,
+    opportunityId: args.opportunityId,
     error: args.error,
+    serverSecret,
+  });
+}
+
+/** Latest session for a RAG opportunity uuid, used to dedup repeated deploy intents. */
+export async function getOrchestrationSessionByOpportunity(args: { opportunityId: string }) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query('serverOrchestration:getSessionByOpportunityServer', {
+    opportunityId: args.opportunityId,
     serverSecret,
   });
 }

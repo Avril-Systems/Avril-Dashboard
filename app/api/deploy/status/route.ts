@@ -69,7 +69,18 @@ export async function GET(req: Request) {
     const remote = await fetchCompanyDeployStatus(resolvedDeploymentId);
 
     if (sessionId) {
+      const previous = (await getOrchestrationSession({ sessionId }).catch(() => null)) as {
+        status?: string | null;
+        endpointUrl?: string | null;
+      } | null;
+      const previousStatus = previous?.status ?? null;
+      const previousUrl = previous?.endpointUrl ?? null;
+
       const mapped = mapLaunchStatusToSessionStatus(remote.status);
+      const statusChanged = mapped !== previousStatus;
+      const urlChanged = Boolean(remote.url) && remote.url !== previousUrl;
+      const reachedReady = remote.status === 'ready' && previousStatus !== 'active';
+
       await setOrchestrationSessionStatus({
         sessionId,
         status: mapped,
@@ -77,17 +88,24 @@ export async function GET(req: Request) {
         endpointUrl: remote.url ?? undefined,
         error: remote.error ?? undefined,
       });
-      await appendOrchestrationEvent({
-        sessionId,
-        type: 'deploy.status',
-        payload: {
-          status: remote.status,
-          url: remote.url,
-          error: remote.error,
-          logs: Array.isArray(remote.logs) ? remote.logs.slice(0, 50) : undefined,
-        },
-      });
-      if (remote.status === 'ready') {
+
+      // Emit deploy.status only on meaningful changes so the office timeline does not
+      // accumulate duplicate events every 5s poll.
+      if (statusChanged || urlChanged || reachedReady) {
+        await appendOrchestrationEvent({
+          sessionId,
+          type: 'deploy.status',
+          payload: {
+            status: remote.status,
+            url: remote.url,
+            error: remote.error,
+            logs: Array.isArray(remote.logs) ? remote.logs.slice(0, 50) : undefined,
+          },
+        });
+      }
+
+      // Emit deploy.ready exactly once, on the transition into ready.
+      if (reachedReady) {
         await appendOrchestrationEvent({
           sessionId,
           type: 'deploy.ready',

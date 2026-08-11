@@ -2,6 +2,7 @@ export type FlowStep =
   | "hero"
   | "loading"
   | "loading-blueprint"
+  | "empty-bank"
   | "opportunities"
   | "blueprint"
   | "deploy"

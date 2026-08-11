@@ -12,6 +12,7 @@ import {
   appendOrchestrationEvent,
   createChat,
   createOrchestrationSession,
+  getOrchestrationSessionByOpportunity,
   upsertOrchestrationAgents,
 } from '@/src/lib/convexServer';
 import { buildSwarmAgentsForPrompt } from '@/src/lib/orchestrationSwarmGuardrails';
@@ -21,6 +22,8 @@ type DeployLaunchBody = {
   session_id?: string;
   /** RAG opportunity uuid (from Stripe metadata via verify, or supplied directly in the body). */
   opportunityId?: string;
+  /** Company name override (used when re-deploying a previously paid session after a 409). */
+  companyName?: string;
 };
 
 const ERROR_STATUS: Record<string, number> = {
@@ -81,7 +84,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const opportunityId = verified.opportunityId || body.opportunityId?.trim();
+    // The explicit body value wins over the Stripe metadata. This is what makes
+    // the "Opción R" redeem flow work: the user paid for idea A (metadata), the
+    // deploy got a 409 (idea already taken), and after re-picking idea B the SAME
+    // paid session is replayed with body.opportunityId = B — without a new charge.
+    const opportunityId = body.opportunityId?.trim() || verified.opportunityId;
     if (!opportunityId) {
       return NextResponse.json(
         {
@@ -92,8 +99,43 @@ export async function POST(req: Request) {
       );
     }
 
+    const companyName = body.companyName?.trim() || verified.companyName;
+
+    const { searchParams } = new URL(req.url);
+    if (searchParams.get('simulate') === '409') {
+      // Simulation hook: prove the 409 → re-pick → redeem flow without touching
+      // the real Launch server. Payment must already be verified (above).
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: 'IDEA_NO_DISPONIBLE',
+            message: 'La idea ya no está disponible. Elige otra empresa.',
+            action: 'elegir_nueva_idea',
+          },
+        },
+        { status: 409 }
+      );
+    }
+
+    // Dedup: if a session already exists for this RAG opportunity, return it instead of
+    // calling Launch again (a retry/refresh would otherwise get 409 IDEA_NO_DISPONIBLE
+    // because the idea was already acquired by the original deploy).
+    const existing = await getOrchestrationSessionByOpportunity({ opportunityId }).catch(() => null);
+    if (existing && existing._id) {
+      return NextResponse.json({
+        ok: true,
+        companyId: typeof existing.containerRef === 'string' ? existing.containerRef.replace(/^oc-/, '') : null,
+        status: existing.status ?? 'queued',
+        deploymentId: existing.spawnRequestId ?? null,
+        orchestrationSessionId: existing._id,
+        alreadyExisted: true,
+        companyName,
+        planId: verified.planId,
+      });
+    }
+
     const result = await startCompanyDeploy(opportunityId);
-    const companyName = verified.companyName;
 
     // Adapter (compatibilidad temporal, ver CONTRATOS_INTEGRACION_FLUJOS.md):
     // Launch provisiona y corre el runtime, pero NO toca Convex. El dashboard crea
@@ -109,6 +151,7 @@ export async function POST(req: Request) {
           status: mapLaunchStatusToSessionStatus(result.status),
           spawnRequestId: result.deploymentId ?? undefined,
           containerRef: result.companyId ? `oc-${result.companyId}` : undefined,
+          opportunityId,
         });
         if (newSessionId) {
           orchestrationSessionId = newSessionId;

@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Check, CreditCard } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, CreditCard, RefreshCcw } from 'lucide-react';
 import {
   DEPLOYMENT_PLANS,
   DEPLOY_PLAN_INTERVAL_LABELS,
@@ -10,6 +10,7 @@ import {
 import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { cn } from '@/lib/utils';
+import { readRedeemCheckout, updateRedeemCheckout } from '@/src/lib/checkoutRedeem';
 
 type PaymentModuleProps = {
   companyName: string;
@@ -31,6 +32,12 @@ export function PaymentModule({
   const [selectedPlan, setSelectedPlan] = useState<DeploymentPlanId>('managed-launch');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [redeem, setRedeem] = useState(() => readRedeemCheckout());
+
+  useEffect(() => {
+    // Refresh the redeem credit when the user lands here after picking another idea.
+    setRedeem(readRedeemCheckout());
+  }, [companyName, opportunityId]);
 
   const stripeEnabled = process.env.NEXT_PUBLIC_CHECKOUT_MODE === 'stripe';
   const intervalLabels = DEPLOY_PLAN_INTERVAL_LABELS[language];
@@ -42,6 +49,20 @@ export function PaymentModule({
   async function handleCheckout() {
     setLoading(true);
     setError(null);
+
+    if (redeem && opportunityId) {
+      // Opción R: the user already paid for a deploy whose idea hit a 409. Reuse the
+      // SAME paid Stripe session for this new idea — no new checkout, no new charge.
+      try {
+        updateRedeemCheckout({ opportunityId, companyName });
+        window.location.href = `/billing/success?session_id=${encodeURIComponent(redeem.sessionId)}`;
+        return;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not reuse payment');
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       const res = await fetch('/api/billing/checkout', {
@@ -96,6 +117,17 @@ export function PaymentModule({
           <p className="font-mono text-[11px] text-muted-foreground/80">Linked idea · {ideaId.slice(0, 12)}…</p>
         )}
       </div>
+
+      {redeem && opportunityId && (
+        <div className="flex items-center justify-center gap-2 rounded-xl border border-brand/40 bg-brand/10 px-4 py-3 text-center text-sm text-brand">
+          <RefreshCcw size={14} className="shrink-0" />
+          <span>
+            {language === 'es'
+              ? 'Usando tu pago ya procesado — no se te cobrará de nuevo por esta oportunidad.'
+              : 'Using your processed payment — you will not be charged again for this opportunity.'}
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-3">
         {DEPLOYMENT_PLANS.map((plan) => {

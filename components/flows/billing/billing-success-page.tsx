@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { FlowShell } from '@/components/flows/shared/flow-shell';
 import { FlowDashboard } from '@/components/flows/shared/flow-dashboard';
 import { CompanyCreating } from '@/components/flows/shared/company-creating';
@@ -11,6 +12,12 @@ import { GlassPanel } from '@/components/patterns/glass-panel';
 import { useLanguage } from '@/components/marketing/language-context';
 import { fetchWalletSession } from '@/src/lib/establishWalletSession';
 import { rememberOfficeSessionId } from '@/src/lib/officeSessionMemory';
+import {
+  clearRedeemCheckout,
+  readRedeemCheckout,
+  updateRedeemCheckout,
+  writeRedeemCheckout,
+} from '@/src/lib/checkoutRedeem';
 
 type DeployResult = {
   ok?: boolean;
@@ -25,6 +32,78 @@ type DeployResult = {
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLL_ATTEMPTS = 36;
 
+type DeployLaunchOutcome = { deploy: DeployResult; companyName: string; ideaId?: string; planId?: string };
+
+// Single-flight: React 18 StrictMode double-invokes effects in dev, which would otherwise fire
+// two concurrent POST /api/deploy/launch (the losing one gets 409 IDEA_NO_DISPONIBLE and the idea
+// was already acquired by the winner). Keyed by Stripe session_id, dropped once settled so a real
+// refresh can retry (server-side dedup in /api/deploy/launch handles that case safely).
+const deployLaunchTasks = new Map<string, Promise<DeployLaunchOutcome>>();
+
+function getDeployLaunchTask(sessionId: string): Promise<DeployLaunchOutcome> {
+  let task = deployLaunchTasks.get(sessionId);
+  if (!task) {
+    task = (async () => {
+      const [verifyRes, walletSession] = await Promise.all([
+        fetch(`/api/billing/verify?session_id=${encodeURIComponent(sessionId)}`, { cache: 'no-store' }),
+        fetchWalletSession(),
+      ]);
+
+      const data = (await verifyRes.json()) as {
+        ok?: boolean;
+        paid?: boolean;
+        companyName?: string;
+        planId?: string;
+        ideaId?: string | null;
+        opportunityId?: string | null;
+      };
+
+      if (!verifyRes.ok || !data.ok || !data.paid) {
+        throw new Error('Payment is not verified.');
+      }
+
+      // Opción R redeem: if this paid session is a replayed checkout after a 409,
+      // the user already picked a new idea (stored client-side). That override must
+      // win over the Stripe metadata (which still holds the first, failed idea).
+      const redeem = readRedeemCheckout();
+      const reusing = redeem !== null && redeem.sessionId === sessionId;
+      const name =
+        (reusing && (redeem.companyName || data.companyName)) || data.companyName || '';
+      const overriddenOpportunityId =
+        (reusing && (redeem.opportunityId || data.opportunityId)) || data.opportunityId;
+      const linkedIdeaId = data.ideaId || walletSession?.luckIdeaId || undefined;
+
+      // Allow E2E simulation without a real Launch conflict: ?simulate=409 makes
+      // /api/deploy/launch answer a fake IDEA_NO_DISPONIBLE so we can test the
+      // "choose another idea" redeem flow end-to-end.
+      const simulate = new URLSearchParams(window.location.search).get('simulate');
+
+      let deploy: DeployResult = {};
+      try {
+        const qs = simulate ? `?simulate=${encodeURIComponent(simulate)}` : '';
+        const deployRes = await fetch(`/api/deploy/launch${qs}`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            opportunityId: overriddenOpportunityId ?? undefined,
+            companyName: reusing ? name || undefined : undefined,
+          }),
+        });
+        deploy = (await deployRes.json().catch(() => ({}))) as DeployResult;
+      } catch {
+        deploy = { error: { message: 'Could not start the company deploy.' } };
+      }
+
+      return { deploy, companyName: name, ideaId: linkedIdeaId, planId: data.planId };
+    })();
+    task.finally(() => deployLaunchTasks.delete(sessionId));
+    deployLaunchTasks.set(sessionId, task);
+  }
+  return task;
+}
+
 export function BillingSuccessPage() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session_id');
@@ -38,6 +117,7 @@ export function BillingSuccessPage() {
   const [deployStatus, setDeployStatus] = useState<string | null>(null);
   const deployRef = useRef<{ deploymentId?: string | null; orchestrationSessionId?: string | null }>({});
   const pollAttemptRef = useRef(0);
+  const [redeemActive, setRedeemActive] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -47,72 +127,49 @@ export function BillingSuccessPage() {
 
     let cancelled = false;
 
-    void (async () => {
-      try {
-        const [verifyRes, walletSession] = await Promise.all([
-          fetch(`/api/billing/verify?session_id=${encodeURIComponent(sessionId)}`, { cache: 'no-store' }),
-          fetchWalletSession(),
-        ]);
-
-        const data = (await verifyRes.json()) as {
-          ok?: boolean;
-          paid?: boolean;
-          companyName?: string;
-          ideaId?: string | null;
-          opportunityId?: string | null;
-        };
-
-        if (!verifyRes.ok || !data.ok || !data.paid) {
-          setState('failed');
-          return;
-        }
-
-        const name = data.companyName || '';
-        const linkedIdeaId = data.ideaId || walletSession?.luckIdeaId || undefined;
-
-        let deploy: DeployResult = {};
-        try {
-          const deployRes = await fetch('/api/deploy/launch', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              session_id: sessionId,
-              opportunityId: data.opportunityId ?? undefined,
-            }),
-          });
-          deploy = (await deployRes.json().catch(() => ({}))) as DeployResult;
-        } catch {
-          deploy = { error: { message: 'Could not start the company deploy.' } };
-        }
-
+    void getDeployLaunchTask(sessionId)
+      .then(({ deploy, companyName: name, ideaId: linkedIdeaId, planId }) => {
         if (cancelled) return;
 
         setCompanyName(name);
         setIdeaId(linkedIdeaId);
 
-        if (deploy.ok && deploy.orchestrationSessionId) {
-          deployRef.current = {
-            deploymentId: deploy.deploymentId ?? null,
-            orchestrationSessionId: deploy.orchestrationSessionId,
-          };
+        if (deploy.ok) {
+          clearRedeemCheckout();
+          if (deploy.orchestrationSessionId) {
+            deployRef.current = {
+              deploymentId: deploy.deploymentId ?? null,
+              orchestrationSessionId: deploy.orchestrationSessionId,
+            };
+            setCompanyId(deploy.companyId ?? null);
+            setState('creating');
+            return;
+          }
+
           setCompanyId(deploy.companyId ?? null);
           setState('creating');
           return;
         }
 
-        if (deploy.ok) {
-          setCompanyId(deploy.companyId ?? null);
-          setState('creating');
-          return;
+        // The idea the user paid for is no longer available (or a simulated 409).
+        // Persist the paid session so the next opportunity reuses it (no new charge).
+        if (deploy.error?.action === 'elegir_nueva_idea') {
+          writeRedeemCheckout({ sessionId, planId: planId ?? '' });
+          setRedeemActive(true);
+          toast.error(deploy.error.message || 'La idea ya no está disponible. Elige otra empresa.', {
+            description: 'Tu pago se reutilizará para la próxima oportunidad — no se te cobrará de nuevo.',
+            duration: 8000,
+          });
+        } else if (deploy.error?.message) {
+          toast.error(deploy.error.message);
         }
 
         if (deploy.error?.message) setDeployError(deploy.error.message);
         setState('failed');
-      } catch {
+      })
+      .catch(() => {
         if (!cancelled) setState('failed');
-      }
-    })();
+      });
 
     return () => {
       cancelled = true;
@@ -198,9 +255,18 @@ export function BillingSuccessPage() {
               ? 'Revisa tu sesión de Stripe o intenta de nuevo desde el flujo de deploy.'
               : 'Check your Stripe session or try again from the deploy step.'}
           </p>
+          {redeemActive && (
+            <GlassPanel className="space-y-2 p-4 text-center">
+              <p className="text-sm font-medium text-amber-200">
+                {language === 'es'
+                  ? 'Tu pago ya está procesado y se reutilizará en la próxima oportunidad — no se te cobrará de nuevo.'
+                  : 'Your payment is already processed and will be reused for the next opportunity — you will not be charged again.'}
+              </p>
+            </GlassPanel>
+          )}
           <div className="flex flex-wrap justify-center gap-3">
             <Link href="/get-started" className="text-sm text-brand hover:underline">
-              {language === 'es' ? 'Volver a oportunidades' : 'Back to opportunities'}
+              {language === 'es' ? 'Elegir otra idea' : 'Choose another idea'}
             </Link>
             <Link href="/start/idea" className="text-sm text-brand hover:underline">
               {language === 'es' ? 'Volver a mi idea' : 'Back to my idea'}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import { FlowShell } from '@/components/flows/shared/flow-shell';
 import { useLanguage } from '@/components/marketing/language-context';
 import { Eyebrow } from '@/components/patterns/eyebrow';
@@ -21,6 +22,7 @@ export function LuckPage() {
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [bankEmpty, setBankEmpty] = useState(false);
   const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
   const [creatingIdeaId, setCreatingIdeaId] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
@@ -47,22 +49,39 @@ export function LuckPage() {
   const startOpportunityFlow = useCallback(async () => {
     setSelectedOpportunity(null);
     setFlowError(null);
+    setBankEmpty(false);
     setLoadingMessageIndex(0);
     setStep('loading');
 
     try {
-      const res = await fetch('/api/opportunities/generate', {
+      const simulate = new URLSearchParams(window.location.search).get('simulate');
+      const qs = simulate ? `?simulate=${encodeURIComponent(simulate)}` : '';
+      const res = await fetch(`/api/opportunities/generate${qs}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
       const data = (await res.json()) as {
         ok?: boolean;
         opportunities?: Opportunity[];
+        bankEmpty?: boolean;
         error?: { message?: string };
       };
 
       if (!res.ok || !data.ok || !data.opportunities) {
         throw new Error(data.error?.message || 'Could not generate opportunities');
+      }
+
+      if (data.bankEmpty || data.opportunities.length === 0) {
+        setBankEmpty(true);
+        setOpportunities([]);
+        setStep('empty-bank');
+        toast.warning(
+          language === 'es'
+            ? 'No quedan ideas disponibles en este momento.'
+            : 'No opportunities are available right now.',
+          { description: 'Vuelve a intentarlo en un momento.' }
+        );
+        return;
       }
 
       setOpportunities(data.opportunities);
@@ -71,7 +90,7 @@ export function LuckPage() {
       setFlowError(err instanceof Error ? err.message : 'Could not generate opportunities');
       setStep('hero');
     }
-  }, []);
+  }, [language]);
 
   const handleSelectOpportunity = useCallback(async (opportunity: Opportunity) => {
     setSelectedOpportunity(opportunity);
@@ -105,6 +124,7 @@ export function LuckPage() {
     setLinkedIdeaId(null);
     setCreatingIdeaId(null);
     setFlowError(null);
+    setBankEmpty(false);
   };
 
   return (
@@ -147,6 +167,41 @@ export function LuckPage() {
         {step === 'loading-blueprint' && (
           <motion.div key="loading-blueprint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <LoadingState message={o.loading[loadingMessageIndex]} />
+          </motion.div>
+        )}
+
+        {step === 'empty-bank' && (
+          <motion.div
+            key="empty-bank"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mx-auto max-w-md space-y-6 text-center"
+          >
+            <div className="space-y-3">
+              <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">
+                {o.resultsEyebrow}
+              </p>
+              <h2 className="text-3xl tracking-tight md:text-4xl">
+                {language === 'es' ? 'Hoy no quedan ideas' : 'No ideas left today'}
+              </h2>
+              <p className="text-muted-foreground">
+                {language === 'es'
+                  ? 'El banco de oportunidades está temporalmente agotado. Vuelve a intentarlo en un momento.'
+                  : 'The opportunity bank is temporarily empty. Try again in a moment.'}
+              </p>
+            </div>
+            {flowError && <p className="text-sm text-rose-400">{flowError}</p>}
+            <div className="flex justify-center">
+              <CosmicButton
+                as="button"
+                type="button"
+                onClick={() => void startOpportunityFlow()}
+                className="w-full max-w-xs sm:w-auto "
+              >
+                {language === 'es' ? 'Reintentar' : 'Try again'}
+              </CosmicButton>
+            </div>
           </motion.div>
         )}
 

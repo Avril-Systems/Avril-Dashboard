@@ -33,12 +33,15 @@ export default defineSchema({
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
     endpointUrl: v.optional(v.string()),
+    /** RAG opportunity uuid consumed by Launch; used to dedup repeated deploy intents. */
+    opportunityId: v.optional(v.string()),
     error: v.optional(v.string()),
     createdAt: v.string(),
     updatedAt: v.string(),
   })
     .index('by_chat', ['chatId'])
-    .index('by_org_updatedAt', ['organizationId', 'updatedAt']),
+    .index('by_org_updatedAt', ['organizationId', 'updatedAt'])
+    .index('by_opportunityId', ['opportunityId']),
   orchestrationAgents: defineTable({
     sessionId: v.id('orchestrationSessions'),
     agentKey: v.string(),
@@ -85,6 +88,10 @@ export default defineSchema({
     language: v.optional(v.string()),
     channelPreferences: v.optional(v.array(v.string())),
     riskTolerance: v.optional(v.string()),
+    /** Legacy fields present in historical founderIdeas docs (kept optional so existing data passes validation). */
+    intakeSource: v.optional(v.string()),
+    luckOpportunityId: v.optional(v.string()),
+    luckScore: v.optional(v.number()),
     status: v.union(
       v.literal('draft'),
       v.literal('briefing'),

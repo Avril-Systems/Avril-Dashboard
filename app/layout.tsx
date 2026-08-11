@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { Toaster } from 'sonner';
 import ConvexClientProvider from '@/src/components/ConvexClientProvider';
 import WaaPProvider from '@/src/components/WaaPProvider';
 import { UIStoreProvider } from '@/src/lib/store';
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </ThemeProvider>
           </UIStoreProvider>
         </WaaPProvider>
+        <Toaster richColors closeButton position="bottom-right" theme="dark" />
       </body>
     </html>
   );

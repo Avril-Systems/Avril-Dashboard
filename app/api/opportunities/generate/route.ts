@@ -42,12 +42,24 @@ export async function POST(req: Request) {
       });
     }
 
+    // E2E simulation hook: force the "empty bank" outcome without touching the RAG.
+    const { searchParams } = new URL(req.url);
+    if (searchParams.get('simulate') === 'empty-bank') {
+      return NextResponse.json({
+        ok: true,
+        opportunities: [],
+        bankEmpty: true,
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
     const raw = await fetchRandomBlueprints();
     const opportunities = raw.map(mapRagBlueprintToOpportunity);
 
     return NextResponse.json({
       ok: true,
       opportunities,
+      bankEmpty: opportunities.length === 0,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {
