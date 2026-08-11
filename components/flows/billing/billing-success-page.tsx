@@ -11,6 +11,7 @@ import { CompanyCreating } from '@/components/flows/shared/company-creating';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 import { useLanguage } from '@/components/marketing/language-context';
 import { fetchWalletSession } from '@/src/lib/establishWalletSession';
+import { markIdeaPaid } from '@/src/lib/paidIdeas';
 import { rememberOfficeSessionId } from '@/src/lib/officeSessionMemory';
 import {
   clearRedeemCheckout,
@@ -136,6 +137,7 @@ export function BillingSuccessPage() {
 
         if (deploy.ok) {
           clearRedeemCheckout();
+          markIdeaPaid(linkedIdeaId);
           if (deploy.orchestrationSessionId) {
             deployRef.current = {
               deploymentId: deploy.deploymentId ?? null,
@@ -151,7 +153,7 @@ export function BillingSuccessPage() {
           return;
         }
 
-        // The idea the user paid for is no longer available (or a simulated 409).
+// The idea the user paid for is no longer available (or a simulated 409).
         // Persist the paid session so the next opportunity reuses it (no new charge).
         if (deploy.error?.action === 'elegir_nueva_idea') {
           writeRedeemCheckout({ sessionId, planId: planId ?? '' });

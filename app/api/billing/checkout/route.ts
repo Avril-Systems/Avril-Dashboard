@@ -45,8 +45,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: { message: 'Company name is required.' } }, { status: 400 });
     }
 
-    const flowSource = body.flowSource?.trim() || 'marketing';
-    const session = readSession(req);
+const flowSource = body.flowSource?.trim() || 'marketing';
+    let session = readSession(req);
+
+// 🚧 TEMP BYPASS — SOLO PARA VER DISEÑO EN LOCAL. BORRAR ESTE BLOQUE ANTES DE COMMIT/PUSH.
+    if (!session && process.env.NODE_ENV !== 'production') {
+      session = {
+        address: '0x0000000000000000000000000000000000dead',
+        human: true,
+        exp: Date.now() + 1000 * 60 * 60,
+        luckIdeaId: body.ideaId?.trim() || 'design-preview-only',
+      };
+    }
+    // 🚧 FIN TEMP BYPASS
 
     if (!session) {
       return NextResponse.json(

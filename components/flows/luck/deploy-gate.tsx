@@ -9,6 +9,7 @@ import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { PaymentModule } from './payment-module';
 import type { Opportunity } from './types';
+import { hasIdeaBeenPaid, markIdeaPaid } from '@/src/lib/paidIdeas';
 
 type GatePhase = 'sign-in' | 'linking' | 'payment';
 
@@ -23,7 +24,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
   const { t } = useLanguage();
   const s = t.flow.signIn;
   const { isReady, login, refreshWalletSession } = useWaaP();
-  const [phase, setPhase] = useState<GatePhase>('sign-in');
+  const [phase, setPhase] = useState<GatePhase>('payment'); // TODO: revertir a 'sign-in' antes de subir
   const [ideaId, setIdeaId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,8 +59,9 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     persistLuckSelection(opportunity);
   }, [opportunity]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!isReady) return;
+    return; // TEMP: bypass para ver diseño — revertir junto con el cambio de useState arriba
     let cancelled = false;
 
     async function resume() {
@@ -78,7 +80,11 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
         // a free deploy. Every company pays: one company = one checkout.
         // Production rule: one company deploy = one deploymentIntent + one checkout.
         // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
-        setPhase('payment');
+if (session.plan && hasIdeaBeenPaid(freshIdeaId)) {
+          onCompleteRef.current(freshIdeaId);
+        } else {
+          setPhase('payment');
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to save selection');
@@ -115,6 +121,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     clearPersistedLuckSelection();
     try {
       const id = ideaIdRef.current ?? (await saveSelection());
+      markIdeaPaid(id);
       onCompleteRef.current(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not continue after payment');

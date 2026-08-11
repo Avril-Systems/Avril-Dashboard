@@ -23,15 +23,7 @@ export function MarketingFooterCTA() {
         scale={0.85}
         softness={0.9}
       />
-      <LiquidMetalShape
-        variant="orbs"
-        className="absolute -right-10 top-1/2 hidden h-[300px] w-[160px] -translate-y-1/2 opacity-55 xl:block"
-        colorTint={avrilColors.accentMagenta}
-        speed={0.6}
-        scale={0.75}
-        shiftRed={0.6}
-        shiftBlue={-0.8}
-      />
+
 
       <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center gap-8 px-6 text-center">
         <Eyebrow>{c.eyebrow}</Eyebrow>
