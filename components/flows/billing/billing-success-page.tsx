@@ -39,6 +39,30 @@ const POLL_INTERVAL_MS = 5_000;
 const MAX_POLL_ATTEMPTS = 36;
 const MAX_LAUNCH_ATTEMPTS = 2;
 const LAUNCH_RETRY_DELAY_MS = 2_000;
+const DEPLOY_TOAST_START = "deploy-status-start";
+
+function deployStatusLabel(status: string, language: string): string {
+  switch (status) {
+    case "pending":
+      return language === "es"
+        ? "En cola de despliegue…"
+        : "Queued for deploy…";
+    case "provisioning":
+      return language === "es"
+        ? "Aprovisionando infraestructura…"
+        : "Provisioning infrastructure…";
+    case "ready":
+      return language === "es" ? "¡Lista!" : "Ready!";
+    case "failed":
+      return language === "es" ? "El despliegue falló." : "The deploy failed.";
+    case "stale":
+      return language === "es"
+        ? "El despliegue quedó obsoleto."
+        : "The deploy is stale.";
+    default:
+      return status;
+  }
+}
 
 type DeployLaunchOutcome = {
   deploy: DeployResult;
@@ -149,7 +173,7 @@ function getDeployLaunchTask(sessionId: string): Promise<DeployLaunchOutcome> {
         planId: data.planId,
       };
     })();
-    task.finally(() => deployLaunchTasks.delete(sessionId));
+    task.finally(() => deployLaunchTasks.delete(sessionId)).catch(() => {});
     deployLaunchTasks.set(sessionId, task);
   }
   return task;
@@ -197,6 +221,12 @@ export function BillingSuccessPage() {
         if (deploy.ok) {
           clearRedeemCheckout();
           markIdeaPaid(linkedIdeaId);
+          toast.loading(
+            language === "es"
+              ? `Iniciando despliegue de ${name || "tu empresa"}…`
+              : `Starting deploy of ${name || "your company"}…`,
+            { id: DEPLOY_TOAST_START },
+          );
           if (deploy.orchestrationSessionId) {
             deployRef.current = {
               deploymentId: deploy.deploymentId ?? null,
@@ -280,10 +310,38 @@ export function BillingSuccessPage() {
         if (cancelled) return;
 
         const status = data.status ?? null;
-        if (status) {
+        if (status && status !== lastStatusRef.current) {
           setDeployStatus(status);
           lastStatusRef.current = status;
           if (typeof data.error === "string") lastErrorRef.current = data.error;
+
+          toast.dismiss(DEPLOY_TOAST_START);
+          const company =
+            companyName || (language === "es" ? "tu empresa" : "your company");
+          if (status === "ready") {
+            toast.success(
+              language === "es"
+                ? `¡${company} está lista!`
+                : `${company} is ready!`,
+              { id: "deploy-status-ready" },
+            );
+          } else if (status === "failed" || status === "stale") {
+            toast.error(deployStatusLabel(status, language), {
+              id: `deploy-status-${status}`,
+              description:
+                typeof data.error === "string"
+                  ? data.error
+                  : language === "es"
+                    ? "Contacta a soporte."
+                    : "Contact support.",
+            });
+          } else {
+            toast.info(deployStatusLabel(status, language), {
+              id: `deploy-status-${status}`,
+              description: company,
+              duration: 4000,
+            });
+          }
         }
 
         if (status === "ready") {
@@ -345,7 +403,7 @@ export function BillingSuccessPage() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [state, router, language, searchParams]);
+  }, [state, router, language, searchParams, companyName]);
 
   if (state === "loading") {
     return (
