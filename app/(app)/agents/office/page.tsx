@@ -15,6 +15,7 @@ import { avrilTypography } from '@/lib/avril-tokens';
 import { cn } from '@/lib/utils';
 import { readLastOfficeSessionId, rememberOfficeSessionId } from '@/src/lib/officeSessionMemory';
 import { ORCHESTRATION_DEMO_SHARED_ORG } from '@/src/lib/orchestrationDemoScope';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
 
@@ -287,7 +288,6 @@ function OfficeEmptyState({
     </div>
   );
 }
-
 function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<Session | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -309,7 +309,7 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
     setShowDebug(false);
   }, [sessionId]);
 
-  useEffect(() => {
+useEffect(() => {
     let active = true;
 
     async function loadState() {
@@ -459,21 +459,36 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
             <GlassPanel className="shrink-0 p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h4 className={cn(avrilTypography.card, 'text-sm')}>Agent Controls</h4>
-                {resolvedChatId && (
-                  <button
-                    type="button"
-                    onClick={() => setShowChat((v) => !v)}
-                    className={cn(
-                      'rounded-full border px-3 py-1 text-xs font-heading transition-colors',
-                      showChat
-                        ? 'border-brand/40 bg-brand/15 text-brand'
-                        : 'border-border/70 bg-surface/60 text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {showChat ? 'Hide Chat' : 'Chat'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowChat((v) => !v)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-heading transition-colors',
+                    showChat
+                      ? 'border-brand/40 bg-brand/15 text-brand'
+                      : 'border-border/70 bg-surface/60 text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {showChat ? 'Hide Timeline' : 'Timeline'}
+                </button>
               </div>
+
+             <AnimatePresence initial={false}>
+                {showChat && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 220, opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className="h-[220px] pb-3">
+                      <SessionTimeline events={events} />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {!selectedAgent && (
                 <p className="text-xs text-muted-foreground">
                   Select an agent in the map to inspect and control it.
@@ -504,7 +519,7 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
               )}
             </GlassPanel>
 
-            {showChat && resolvedChatId && (
+           {resolvedChatId && (
               <div className="shrink-0">
                 <OfficeAgentChat
                   agents={agents.map((a) => ({
@@ -520,9 +535,7 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
               </div>
             )}
 
-            <div className="flex h-[280px] shrink-0 flex-col">
-              <SessionTimeline events={events} />
-            </div>
+            
           </div>
         </div>
       </div>
