@@ -19,6 +19,7 @@ import type * as lib_authz from "../lib/authz.js";
 import type * as lib_companyDisplayName from "../lib/companyDisplayName.js";
 import type * as lib_founderPrompts from "../lib/founderPrompts.js";
 import type * as lib_venice from "../lib/venice.js";
+import type * as serverBilling from "../serverBilling.js";
 import type * as serverChatIgnition from "../serverChatIgnition.js";
 import type * as serverChats from "../serverChats.js";
 import type * as serverControlPlane from "../serverControlPlane.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   "lib/companyDisplayName": typeof lib_companyDisplayName;
   "lib/founderPrompts": typeof lib_founderPrompts;
   "lib/venice": typeof lib_venice;
+  serverBilling: typeof serverBilling;
   serverChatIgnition: typeof serverChatIgnition;
   serverChats: typeof serverChats;
   serverControlPlane: typeof serverControlPlane;

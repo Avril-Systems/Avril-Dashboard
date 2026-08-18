@@ -10,3 +10,4 @@ cache
 out
 broadcast
 .env*
+script/e2e-results.json

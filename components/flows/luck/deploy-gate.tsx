@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Wallet } from 'lucide-react';
 import { useWaaP } from '@/src/components/WaaPProvider';
-import { signInWithWallet } from '@/src/lib/establishWalletSession';
+import { clearWalletSession, signInWithWallet } from '@/src/lib/establishWalletSession';
 import { clearPersistedLuckSelection, persistLuckSelection } from '@/src/lib/luckIntake';
 import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { PaymentModule } from './payment-module';
 import type { Opportunity } from './types';
 import { hasIdeaBeenPaid, markIdeaPaid } from '@/src/lib/paidIdeas';
+
+// The old design bypass baked this fake address into a signed session cookie.
+// A wallet can never own it, so any session claiming it is stale — treat it as
+// not signed in and clear it so the user is forced through a real sign-in.
+const FAKE_BYPASS_WALLET = '0x0000000000000000000000000000000000dead';
 
 type GatePhase = 'sign-in' | 'linking' | 'payment';
 
@@ -24,7 +29,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
   const { t } = useLanguage();
   const s = t.flow.signIn;
   const { isReady, login, refreshWalletSession } = useWaaP();
-  const [phase, setPhase] = useState<GatePhase>('payment'); // TODO: revertir a 'sign-in' antes de subir
+  const [phase, setPhase] = useState<GatePhase>('sign-in');
   const [ideaId, setIdeaId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,14 +64,21 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     persistLuckSelection(opportunity);
   }, [opportunity]);
 
-useEffect(() => {
+  useEffect(() => {
     if (!isReady) return;
-    return; // TEMP: bypass para ver diseño — revertir junto con el cambio de useState arriba
     let cancelled = false;
 
     async function resume() {
-      const session = await refreshWalletSession();
+      let session = await refreshWalletSession();
       if (cancelled) return;
+
+      // Stale fake session from the removed design bypass: never treat it as a
+      // real sign-in. Clear it and ask the user to authenticate properly.
+      if (session?.address?.toLowerCase() === FAKE_BYPASS_WALLET) {
+        await clearWalletSession().catch(() => null);
+        session = null;
+      }
+
       if (!session) {
         setPhase('sign-in');
         return;
@@ -80,7 +92,7 @@ useEffect(() => {
         // a free deploy. Every company pays: one company = one checkout.
         // Production rule: one company deploy = one deploymentIntent + one checkout.
         // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
-if (session.plan && hasIdeaBeenPaid(freshIdeaId)) {
+        if (session.plan && hasIdeaBeenPaid(freshIdeaId)) {
           onCompleteRef.current(freshIdeaId);
         } else {
           setPhase('payment');

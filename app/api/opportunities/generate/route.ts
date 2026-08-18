@@ -34,17 +34,14 @@ export async function POST(req: Request) {
       );
     }
 
-    if (mockModeEnabled()) {
-      return NextResponse.json({
-        ok: true,
-        opportunities: getMockOpportunities(languageFromRequest(req)),
-        generatedAt: new Date().toISOString(),
-      });
-    }
-
     // E2E simulation hook: force the "empty bank" outcome without touching the RAG.
+    // Checked BEFORE mockModeEnabled() so the hook stays reachable even when the
+    // offline mock (getMockOpportunities) is active. Only available in dev.
     const { searchParams } = new URL(req.url);
-    if (searchParams.get('simulate') === 'empty-bank') {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      searchParams.get('simulate') === 'empty-bank'
+    ) {
       return NextResponse.json({
         ok: true,
         opportunities: [],
@@ -53,13 +50,21 @@ export async function POST(req: Request) {
       });
     }
 
+    if (mockModeEnabled()) {
+      return NextResponse.json({
+        ok: true,
+        opportunities: getMockOpportunities(languageFromRequest(req)),
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
     const raw = await fetchRandomBlueprints();
-    const opportunities = raw.map(mapRagBlueprintToOpportunity);
+    const opportunities = raw.map(mapRagBlueprintToOpportunity).slice(0, 3);
 
     return NextResponse.json({
       ok: true,
       opportunities,
-      bankEmpty: opportunities.length === 0,
+      bankEmpty: opportunities.length < 3,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {

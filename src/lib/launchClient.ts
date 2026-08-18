@@ -4,7 +4,7 @@ const LAUNCH_BASE_URL = process.env.LAUNCH_API_URL;
 const LAUNCH_API_TOKEN = process.env.LAUNCH_API_TOKEN;
 const LAUNCH_ENABLED = process.env.LAUNCH_DEPLOY_ENABLED === 'true';
 
-export const LAUNCH_REQUEST_TIMEOUT_MS = 10_000;
+export const LAUNCH_REQUEST_TIMEOUT_MS = 30_000;
 
 export type LaunchStatus = 'pending' | 'provisioning' | 'ready' | 'failed' | 'stale';
 
@@ -146,11 +146,14 @@ export async function startCompanyDeploy(uuid: string): Promise<LaunchStartResul
     }
 
     if (!res.ok) {
-      throw new LaunchServiceError(
-        `Launch /iniciar responded with ${res.status}`,
-        'LAUNCH_UPSTREAM_ERROR',
-        res.status >= 500
-      );
+      // 5xx (p. ej. 503) puede ocurrir DESPUÉS de que Launch reservara la idea: el
+      // usuario verá un error temporal, no "ya fue reservada", y no debe reintentar
+      // automáticamente la misma oportunidad (ver billing-success-page.tsx).
+      const message =
+        res.status === 503
+          ? 'El servicio de deploy está temporalmente ocupado; la idea pudo haber quedado reservada.'
+          : `Launch /iniciar responded with ${res.status}`;
+      throw new LaunchServiceError(message, 'LAUNCH_UPSTREAM_ERROR', res.status >= 500);
     }
 
     return extractStartResult(payload, res.status === 200);

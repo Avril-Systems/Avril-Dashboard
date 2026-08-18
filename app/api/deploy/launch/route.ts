@@ -1,21 +1,31 @@
-import { NextResponse } from 'next/server';
-import { getClientIp, hitRateLimit } from '@/src/lib/apiSecurity';
-import { readSession } from '@/src/lib/sessionAuth';
-import { verifyStripeCheckoutSession } from '@/src/lib/stripeCheckout';
-import { isStripeCheckoutEnabled } from '@/src/lib/stripe';
+import { NextResponse } from "next/server";
+import { getClientIp, hitRateLimit } from "@/src/lib/apiSecurity";
+import { readSession } from "@/src/lib/sessionAuth";
+import { verifyStripeCheckoutSession } from "@/src/lib/stripeCheckout";
+import { isStripeCheckoutEnabled } from "@/src/lib/stripe";
 import {
   startCompanyDeploy,
+  fetchCompanyDeployStatus,
   LaunchServiceError,
   mapLaunchStatusToSessionStatus,
-} from '@/src/lib/launchClient';
+} from "@/src/lib/launchClient";
 import {
   appendOrchestrationEvent,
+  attachCheckoutSession,
+  consumeDeploymentIntent,
   createChat,
+  createDeploymentIntent,
   createOrchestrationSession,
+  getDeploymentIntentBySession,
+  getOrchestrationSession,
   getOrchestrationSessionByOpportunity,
+  linkOrchestrationSession,
+  markDeploymentIntentPaid,
+  releaseDeploymentIntent,
+  setOrchestrationSessionStatus,
   upsertOrchestrationAgents,
-} from '@/src/lib/convexServer';
-import { buildSwarmAgentsForPrompt } from '@/src/lib/orchestrationSwarmGuardrails';
+} from "@/src/lib/convexServer";
+import { buildSwarmAgentsForPrompt } from "@/src/lib/orchestrationSwarmGuardrails";
 
 type DeployLaunchBody = {
   /** Stripe Checkout session id. The Launch call only runs when this session is paid. */
@@ -44,16 +54,25 @@ export async function POST(req: Request) {
     const session = readSession(req);
     if (!session) {
       return NextResponse.json(
-        { ok: false, error: { code: 'UNAUTHORIZED', message: 'Sign in with your wallet to continue.' } },
-        { status: 401 }
+        {
+          ok: false,
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Sign in with your wallet to continue.",
+          },
+        },
+        { status: 401 },
       );
     }
 
     const ip = getClientIp(req);
     if (hitRateLimit(`deploy:launch:${ip}`, 15)) {
       return NextResponse.json(
-        { ok: false, error: { code: 'RATE_LIMITED', message: 'Rate limit exceeded' } },
-        { status: 429 }
+        {
+          ok: false,
+          error: { code: "RATE_LIMITED", message: "Rate limit exceeded" },
+        },
+        { status: 429 },
       );
     }
 
@@ -61,15 +80,24 @@ export async function POST(req: Request) {
     const stripeSessionId = body.session_id?.trim();
     if (!stripeSessionId) {
       return NextResponse.json(
-        { ok: false, error: { code: 'BAD_REQUEST', message: 'session_id is required.' } },
-        { status: 400 }
+        {
+          ok: false,
+          error: { code: "BAD_REQUEST", message: "session_id is required." },
+        },
+        { status: 400 },
       );
     }
 
     if (!isStripeCheckoutEnabled()) {
       return NextResponse.json(
-        { ok: false, error: { code: 'STRIPE_NOT_ENABLED', message: 'Stripe checkout is not enabled.' } },
-        { status: 400 }
+        {
+          ok: false,
+          error: {
+            code: "STRIPE_NOT_ENABLED",
+            message: "Stripe checkout is not enabled.",
+          },
+        },
+        { status: 400 },
       );
     }
 
@@ -78,9 +106,12 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: { code: 'PAYMENT_NOT_PAID', message: 'Payment is not verified as paid.' },
+          error: {
+            code: "PAYMENT_NOT_PAID",
+            message: "Payment is not verified as paid.",
+          },
         },
-        { status: 402 }
+        { status: 402 },
       );
     }
 
@@ -93,40 +124,73 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: { code: 'OPPORTUNITY_ID_MISSING', message: 'No RAG opportunity uuid found for this payment.' },
+          error: {
+            code: "OPPORTUNITY_ID_MISSING",
+            message: "No RAG opportunity uuid found for this payment.",
+          },
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const companyName = body.companyName?.trim() || verified.companyName;
 
     const { searchParams } = new URL(req.url);
-    if (searchParams.get('simulate') === '409') {
-      // Simulation hook: prove the 409 → re-pick → redeem flow without touching
-      // the real Launch server. Payment must already be verified (above).
+    if (
+      process.env.NODE_ENV !== "production" &&
+      searchParams.get("simulate") === "409"
+    ) {
       return NextResponse.json(
         {
           ok: false,
           error: {
-            code: 'IDEA_NO_DISPONIBLE',
-            message: 'La idea ya no está disponible. Elige otra empresa.',
-            action: 'elegir_nueva_idea',
+            code: "IDEA_NO_DISPONIBLE",
+            message: "La idea ya no está disponible. Elige otra empresa.",
+            action: "elegir_nueva_idea",
           },
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
-    // Dedup: if a session already exists for this RAG opportunity, return it instead of
-    // calling Launch again (a retry/refresh would otherwise get 409 IDEA_NO_DISPONIBLE
-    // because the idea was already acquired by the original deploy).
-    const existing = await getOrchestrationSessionByOpportunity({ opportunityId }).catch(() => null);
-    if (existing && existing._id) {
+    const existing = await getOrchestrationSessionByOpportunity({
+      opportunityId,
+    }).catch(() => null);
+    let existingTerminalFailure =
+      existing?.status === "failed" || existing?.status === "stale";
+    if (existing && existing._id && !existingTerminalFailure) {
+      // The local session status can be stale (e.g. "active" from a previous
+      // deploy whose container died after a server restart). Before reusing the
+      // session as a dedup hit, verify the REAL remote state with Launch: if the
+      // underlying deployment is actually failed/stale, mark the session failed
+      // and fall through to start a fresh deploy instead of pointing the user at
+      // a dead container ("Container not running after server restart").
+      if (typeof existing.spawnRequestId === "string" && existing.spawnRequestId) {
+        try {
+          const remote = await fetchCompanyDeployStatus(existing.spawnRequestId);
+          if (remote.status === "failed" || remote.status === "stale") {
+            await setOrchestrationSessionStatus({
+              sessionId: existing._id,
+              status: "failed",
+              error:
+                remote.error ??
+                "The deploy is no longer running; a fresh deploy will start.",
+            }).catch(() => null);
+            existingTerminalFailure = true;
+          }
+        } catch {
+          // Launch unreachable: fall back to trusting the local session status.
+        }
+      }
+    }
+    if (existing && existing._id && !existingTerminalFailure) {
       return NextResponse.json({
         ok: true,
-        companyId: typeof existing.containerRef === 'string' ? existing.containerRef.replace(/^oc-/, '') : null,
-        status: existing.status ?? 'queued',
+        companyId:
+          typeof existing.containerRef === "string"
+            ? existing.containerRef.replace(/^oc-/, "")
+            : null,
+        status: existing.status ?? "queued",
         deploymentId: existing.spawnRequestId ?? null,
         orchestrationSessionId: existing._id,
         alreadyExisted: true,
@@ -135,16 +199,130 @@ export async function POST(req: Request) {
       });
     }
 
-    const result = await startCompanyDeploy(opportunityId);
+    let intentConsumed = false;
+    try {
+      let intent = await getDeploymentIntentBySession({
+        stripeCheckoutSessionId: stripeSessionId,
+      });
+      if (!intent) {
+        const lazyId = await createDeploymentIntent({
+          source:
+            verified.flowSource === "form_intake"
+              ? "form_intake"
+              : "rag_opportunity",
+          companyName,
+          opportunityId,
+          founderWallet: session.address,
+          planId: verified.planId || undefined,
+        });
+        await attachCheckoutSession({
+          intentId: lazyId,
+          stripeCheckoutSessionId: stripeSessionId,
+          planId: verified.planId || undefined,
+        });
+        intent = await getDeploymentIntentBySession({
+          stripeCheckoutSessionId: stripeSessionId,
+        });
+      }
+      if (intent) {
+        if (intent.status === "spawning" || intent.status === "deployed") {
+          // If the claimed intent points to an orchestration session that died in a
+          // terminal failure (e.g. container never came up after a VPS restart), the
+          // claim is stale: release the intent so the SAME paid session can re-deploy
+          // without being blocked here (and without a second charge).
+          let staleClaim = false;
+          const claimedSessionId = (
+            intent as { orchestrationSessionId?: string | null }
+          ).orchestrationSessionId;
+          if (claimedSessionId) {
+            try {
+              const claimed = await getOrchestrationSession({
+                sessionId: claimedSessionId,
+              });
+              staleClaim =
+                claimed?.status === "failed" || claimed?.status === "stale";
+            } catch {
+              staleClaim = false;
+            }
+          }
+          if (staleClaim) {
+            await releaseDeploymentIntent({
+              stripeCheckoutSessionId: stripeSessionId,
+            }).catch(() => null);
+            intent = await getDeploymentIntentBySession({
+              stripeCheckoutSessionId: stripeSessionId,
+            });
+          } else {
+            return NextResponse.json({
+              ok: true,
+              status: intent.status === "deployed" ? "active" : "spawning",
+              companyId: null,
+              deploymentId: null,
+              orchestrationSessionId: intent.orchestrationSessionId ?? null,
+              alreadyExisted: true,
+              companyName,
+              planId: verified.planId,
+            });
+          }
+        }
+        if (intent.status === "draft" || intent.status === "checkout_pending") {
+          // Verify already confirmed this session is paid; the webhook may simply
+          // not have processed yet. Reconcile before consuming.
+          await markDeploymentIntentPaid({
+            stripeCheckoutSessionId: stripeSessionId,
+          }).catch(() => null);
+        }
+        const consume = await consumeDeploymentIntent({
+          stripeCheckoutSessionId: stripeSessionId,
+          opportunityId,
+          companyName: companyName || undefined,
+        });
+        if (consume.found && !consume.consumed && consume.status !== "paid") {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: {
+                code: "DEPLOY_ALREADY_STARTED",
+                message: "Este pago ya se utilizó para iniciar un deploy.",
+                retryable: false,
+              },
+            },
+            { status: 409 },
+          );
+        }
+        intentConsumed = true;
+      }
+    } catch {
+      // Convex unavailable or intent handling failed: fall back to the payment-only
+      // guard (payment is already verified above).
+    }
+
+    let result;
+    try {
+      result = await startCompanyDeploy(opportunityId);
+    } catch (err) {
+      // Any Launch failure must leave the paid intent reusable: the user re-picks
+      // another idea and re-deploys with the SAME session — never charged again.
+      if (intentConsumed) {
+        await releaseDeploymentIntent({
+          stripeCheckoutSessionId: stripeSessionId,
+        }).catch(() => null);
+      }
+      throw err;
+    }
 
     // Adapter (compatibilidad temporal, ver CONTRATOS_INTEGRACION_FLUJOS.md):
     // Launch provisiona y corre el runtime, pero NO toca Convex. El dashboard crea
     // la sesión de orquestación que Agent Office visualiza y la enlaza al deploy.
     let orchestrationSessionId: string | null = null;
     try {
-      const chat = await createChat({ title: companyName || 'Untitled company', area: 'General' });
-      const chatId = typeof chat === 'string' ? chat : (chat as { chatId?: string })?.chatId;
-      if (chatId && typeof chatId === 'string') {
+      const chat = await createChat({
+        title: companyName || "Untitled company",
+        area: "General",
+      });
+      const chatId =
+        typeof chat === "string" ? chat : (chat as { chatId?: string })?.chatId;
+      if (chatId && typeof chatId === "string") {
         const newSessionId = await createOrchestrationSession({
           chatId,
           companyName: companyName || undefined,
@@ -155,9 +333,22 @@ export async function POST(req: Request) {
         });
         if (newSessionId) {
           orchestrationSessionId = newSessionId;
+          // Link the paid intent to its orchestration session so the stale-claim
+          // guard above can detect a deploy that died (field was never written).
+          const linkedIntentId = (
+            await getDeploymentIntentBySession({
+              stripeCheckoutSessionId: stripeSessionId,
+            }).catch(() => null)
+          )?._id;
+          if (linkedIntentId) {
+            await linkOrchestrationSession({
+              intentId: linkedIntentId,
+              orchestrationSessionId: newSessionId,
+            }).catch(() => null);
+          }
           await appendOrchestrationEvent({
             sessionId: newSessionId,
-            type: 'deploy.created',
+            type: "deploy.created",
             payload: {
               deploymentId: result.deploymentId,
               companyId: result.companyId,
@@ -200,18 +391,24 @@ export async function POST(req: Request) {
             code: err.code,
             message: err.message,
             retryable: err.retryable,
-            ...(err.code === 'IDEA_NO_DISPONIBLE' ? { action: 'elegir_nueva_idea' } : {}),
+            ...(err.code === "IDEA_NO_DISPONIBLE" ||
+            err.code === "LAUNCH_CONFLICT"
+              ? { action: "elegir_nueva_idea" }
+              : {}),
           },
         },
-        { status: ERROR_STATUS[err.code] ?? 500 }
+        { status: ERROR_STATUS[err.code] ?? 500 },
       );
     }
     return NextResponse.json(
       {
         ok: false,
-        error: { code: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : 'Unknown error' },
+        error: {
+          code: "INTERNAL_ERROR",
+          message: err instanceof Error ? err.message : "Unknown error",
+        },
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

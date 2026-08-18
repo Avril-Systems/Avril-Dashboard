@@ -2,6 +2,9 @@ import 'server-only';
 
 const RAG_BASE_URL = process.env.RAG_SERVICE_BASE_URL;
 
+/** Mirrors launchClient.ts: a hung RAG must not leave the request pending forever. */
+const RAG_REQUEST_TIMEOUT_MS = 12_000;
+
 type RagBlueprintRaw = {
   id: string;
   nombre_empresa: string;
@@ -42,10 +45,7 @@ function requireBaseUrl(): string {
 
 export async function fetchRandomBlueprints(): Promise<RagBlueprintRaw[]> {
   const baseUrl = requireBaseUrl();
-  const res = await fetch(`${baseUrl}/api/blueprints/random`, {
-    method: 'GET',
-    cache: 'no-store',
-  });
+  const res = await fetchWithTimeout(`${baseUrl}/api/blueprints/random`);
 
   if (!res.ok) {
     throw new RagServiceError(
@@ -65,10 +65,9 @@ export async function fetchRandomBlueprints(): Promise<RagBlueprintRaw[]> {
 
 export async function fetchDocumentoIdentidad(uuid: string): Promise<string> {
   const baseUrl = requireBaseUrl();
-  const res = await fetch(`${baseUrl}/api/blueprints/${encodeURIComponent(uuid)}/documento_identidad`, {
-    method: 'GET',
-    cache: 'no-store',
-  });
+  const res = await fetchWithTimeout(
+    `${baseUrl}/api/blueprints/${encodeURIComponent(uuid)}/documento_identidad`
+  );
 
   if (res.status === 404) {
     throw new RagServiceError('Blueprint not found', 'BLUEPRINT_NOT_FOUND', false);
@@ -87,6 +86,32 @@ export async function fetchDocumentoIdentidad(uuid: string): Promise<string> {
   }
 
   return json.data.documento_identidad;
+}
+
+/**
+ * Shared GET with an AbortController timeout. Network failures and timeouts are
+ * mapped to RAG_UPSTREAM_ERROR so the route answers 502 retryable instead of a
+ * catch-all UNKNOWN_ERROR 500 (and never hangs on a stalled upstream).
+ */
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RAG_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === 'AbortError';
+    throw new RagServiceError(
+      aborted ? 'RAG request timed out' : err instanceof Error ? err.message : 'RAG request failed',
+      'RAG_UPSTREAM_ERROR',
+      true
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export { RagServiceError };

@@ -10,6 +10,8 @@ type CreateCheckoutSessionInput = {
   ideaId?: string;
   /** RAG opportunity uuid (used by Launch POST /iniciar/{uuid}). */
   opportunityId?: string;
+  /** Server-side deploymentIntent this checkout pays for (also used as idempotency key). */
+  deploymentIntentId?: string;
   customerEmail?: string;
 };
 
@@ -53,15 +55,28 @@ export async function createStripeCheckoutSession(input: CreateCheckoutSessionIn
       flowSource: input.flowSource,
       ideaId: input.ideaId ?? '',
       opportunityId: input.opportunityId ?? '',
+      deploymentIntentId: input.deploymentIntentId ?? '',
     },
     allow_promotion_codes: true,
+    // client_reference_id stays in the body (it's a valid session param); the
+    // idempotency key is a request-level option, NOT a body param — sending it
+    // in the body makes Stripe reject the call with "unknown parameter".
+    ...(input.deploymentIntentId
+      ? { client_reference_id: input.deploymentIntentId }
+      : {}),
   };
 
   if (input.customerEmail) {
     sessionParams.customer_email = input.customerEmail;
   }
 
-  return stripe.checkout.sessions.create(sessionParams);
+  // One intent = one checkout session: a double-click on "Pay" reuses the same
+  // idempotency key instead of creating a second (chargeable) session.
+  const requestOptions: Stripe.RequestOptions = input.deploymentIntentId
+    ? { idempotencyKey: `deploymentIntent:${input.deploymentIntentId}` }
+    : {};
+
+  return stripe.checkout.sessions.create(sessionParams, requestOptions);
 }
 
 export async function verifyStripeCheckoutSession(sessionId: string) {

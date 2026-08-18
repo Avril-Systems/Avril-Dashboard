@@ -71,7 +71,7 @@ export function LuckPage() {
         throw new Error(data.error?.message || 'Could not generate opportunities');
       }
 
-      if (data.bankEmpty || data.opportunities.length === 0) {
+      if (data.bankEmpty || data.opportunities.length < 3) {
         setBankEmpty(true);
         setOpportunities([]);
         setStep('empty-bank');
@@ -84,7 +84,7 @@ export function LuckPage() {
         return;
       }
 
-      setOpportunities(data.opportunities);
+      setOpportunities(data.opportunities.slice(0, 3));
       setStep('opportunities');
     } catch (err) {
       setFlowError(err instanceof Error ? err.message : 'Could not generate opportunities');

@@ -439,3 +439,36 @@ export const healSessionDisplayNamesServer = mutation({
     return { healed, scanned: sessions.length };
   },
 });
+
+/**
+ * Admin cleanup for terminal-failed orchestration sessions. A failed session
+ * would otherwise leave the deploy dedup in /api/deploy/launch short-circuiting
+ * (alreadyExisted) or returning a stale failed status after a re-deploy. Deleting
+ * the session (and its agents/events) gives the next deploy a clean slate: the
+ * dedup finds nothing and Launch is called again with the paid session.
+ */
+export const deleteSessionForRedeployServer = mutation({
+  args: {
+    sessionId: v.id('orchestrationSessions'),
+    serverSecret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    const session = requireEntity(await ctx.db.get(args.sessionId), 'Orchestration session');
+
+    const agents = await ctx.db
+      .query('orchestrationAgents')
+      .withIndex('by_session', (q) => q.eq('sessionId', session._id))
+      .collect();
+    const events = await ctx.db
+      .query('orchestrationEvents')
+      .withIndex('by_session', (q) => q.eq('sessionId', session._id))
+      .collect();
+
+    for (const agent of agents) await ctx.db.delete(agent._id);
+    for (const event of events) await ctx.db.delete(event._id);
+    await ctx.db.delete(session._id);
+
+    return { deleted: true, sessionId: session._id, agents: agents.length, events: events.length };
+  },
+});
