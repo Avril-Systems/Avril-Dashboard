@@ -11,6 +11,8 @@ import type { Opportunity } from '@/components/flows/luck/types';
 
 type LuckIntakeBody = {
   opportunity?: Opportunity;
+  /** Product entry path — distinguishes RAG cards vs form wizard. */
+  intakeSource?: 'rag_opportunity' | 'form_intake';
 };
 
 export async function POST(req: Request) {
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
         { status: 429 }
       );
     }
-    if (rejectLargePayload(req, 48 * 1024)) {
+    if (rejectLargePayload(req, 256 * 1024)) {
       return NextResponse.json(
         { ok: false, error: { code: 'PAYLOAD_TOO_LARGE', message: 'Payload too large' } },
         { status: 413 }
@@ -47,27 +49,37 @@ export async function POST(req: Request) {
     }
 
     const intake = opportunityToIntake(opportunity);
-    let founderUserId: string | undefined;
-    try {
-      founderUserId = await ensureWalletUser(session.address);
-    } catch {
-      // Best-effort wallet link — intake still proceeds for demo spawn.
-    }
-    const ideaId = await createFounderIdea({
-      founderUserId,
-      founderWallet: session.address,
-      title: intake.title,
-      ideaText: intake.rawIdea,
-      targetUser: intake.targetUser,
-      problem: intake.problem,
-      monetizationPreference: intake.monetizationPreference,
-      businessModelPreference: intake.businessModelPreference,
-      desiredAutomationLevel: intake.desiredAutomationLevel,
-      channelPreferences: intake.channelPreferences,
-      riskTolerance: intake.riskTolerance,
-    });
 
-    const token = refreshSessionToken(session, { luckIdeaId: String(ideaId) });
+    // 🚧 TEMP BYPASS — SOLO PARA VER DISEÑO EN LOCAL, sin Convex configurado. BORRAR ANTES DE COMMIT/PUSH.
+    let founderUserId: string | undefined;
+    let ideaId: string;
+    if (!process.env.NEXT_PUBLIC_CONVEX_URL && process.env.NODE_ENV !== 'production') {
+      ideaId = `design-preview-${Date.now()}`;
+    } else {
+      try {
+        founderUserId = await ensureWalletUser(session.address);
+      } catch {
+        // Best-effort wallet link — intake still proceeds for demo spawn.
+      }
+      ideaId = await createFounderIdea({
+        founderUserId,
+        founderWallet: session.address,
+        title: intake.title,
+        ideaText: intake.rawIdea,
+        targetUser: intake.targetUser,
+        problem: intake.problem,
+        monetizationPreference: intake.monetizationPreference,
+        businessModelPreference: intake.businessModelPreference,
+        desiredAutomationLevel: intake.desiredAutomationLevel,
+        channelPreferences: intake.channelPreferences,
+        riskTolerance: intake.riskTolerance,
+      });
+    }
+    // 🚧 FIN TEMP BYPASS
+
+    const token = refreshSessionToken(session, {
+      luckIdeaId: String(ideaId),
+    });
     if (!token) {
       return NextResponse.json(
         { ok: false, error: { code: 'SESSION_ERROR', message: 'Could not update session' } },

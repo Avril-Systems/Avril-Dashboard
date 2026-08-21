@@ -24,6 +24,8 @@ import { FounderWizard, type WizardAnswers } from "@/components/founder/FounderW
 import { useRouter } from "next/navigation";
 import Plan, { type Task } from "@/components/ui/agent-plan";
 import { rememberOfficeSessionId } from "@/src/lib/officeSessionMemory";
+import { LiquidMetalShape } from "@/components/ui/liquid-metal-shape";
+import { avrilColors } from "@/lib/avril-tokens";
 
 interface UseAutoResizeTextareaProps {
   minHeight: number;
@@ -623,6 +625,28 @@ export function AnimatedAIChat({
     setValue("");
     adjustHeight(true);
 
+    // 🚧 TEMP BYPASS — SOLO PARA VER DISEÑO SIN CONVEX. BORRAR ANTES DE COMMIT/PUSH.
+    if (process.env.NODE_ENV !== "production" && !process.env.NEXT_PUBLIC_CONVEX_URL) {
+      setChatId((prev) => prev ?? "design-preview-chat");
+      startTransition(() => setIsTyping(true));
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-assistant`,
+            role: "assistant",
+            model,
+            content: "Got it — ignition looks ready. You can deploy to OpenClaw whenever you're ready.",
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+        setIgnitionReady(true);
+        setIsTyping(false);
+      }, 700);
+      return;
+    }
+    // 🚧 FIN TEMP BYPASS
+
     startTransition(() => {
       setIsTyping(true);
     });
@@ -753,6 +777,15 @@ export function AnimatedAIChat({
           : "lab-bg min-h-screen bg-transparent p-6 pt-12 text-white",
       )}
     >
+      {hideFolder && (
+        <LiquidMetalShape
+          variant="orbs"
+          className="pointer-events-none fixed -bottom-16 -left-20 z-0 hidden h-[420px] w-[240px] opacity-60 lg:block xl:h-[480px] xl:w-[280px]"
+          colorTint={avrilColors.brand}
+          speed={0.5}
+          scale={0.78}
+        />
+      )}
       {!isMarketing && (
         <div className="absolute inset-0 h-full w-full overflow-hidden">
           <div className="absolute top-0 left-1/4 h-96 w-96 animate-pulse rounded-full bg-violet-500/10 mix-blend-normal blur-[128px] filter" />
@@ -913,17 +946,26 @@ export function AnimatedAIChat({
                       <div
                         key={message.id}
                         className={cn(
-                          "max-w-[88%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap",
+                          "max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
                           message.role === "user"
                             ? hideFolder
-                              ? "ml-auto border border-border/60 bg-surface-raised/60 text-foreground"
+                              ? "ml-auto border border-brand/40 bg-brand/15 text-foreground"
                               : "ml-auto bg-white/10 text-white/90"
                             : hideFolder
-                              ? "mr-auto border border-brand/20 bg-brand/5 text-foreground"
+                              ? "mr-auto border border-border/60 bg-surface-raised/70 text-foreground"
                               : "mr-auto bg-violet-500/10 text-white/90 border border-violet-400/20",
                         )}
                       >
-                        <p className={cn("text-[11px] mb-1", hideFolder ? "text-muted-foreground" : "text-white/45")}>
+                        <p
+                          className={cn(
+                            "text-[11px] mb-1 font-medium",
+                            hideFolder
+                              ? "text-brand"
+                              : message.role === "user"
+                                ? "text-white/45"
+                                : "text-white/45",
+                          )}
+                        >
                           {message.role === "user"
                             ? "You"
                             : message.model === "venice"
@@ -940,10 +982,10 @@ export function AnimatedAIChat({
 
                 <motion.div
                   className={cn(
-                    "relative rounded-2xl border shadow-2xl",
+                    "sticky bottom-4 z-30 rounded-2xl border shadow-2xl",
                     hideFolder
-                      ? "border-border/70 bg-[rgba(0,0,0,0.95)] backdrop-blur-[20px]"
-                      : "backdrop-blur-2xl bg-white/[0.02] border-white/[0.05]",
+                      ? "border-brand/30 bg-[rgba(6,6,8,0.98)] backdrop-blur-[20px]"
+                      : "backdrop-blur-2xl bg-black/70 border-white/10",
                   )}
                   initial={{ scale: 0.98 }}
                   animate={{ scale: 1 }}
@@ -1114,10 +1156,10 @@ export function AnimatedAIChat({
                 {ignitionReady && chatId ? (
                   <div
                     className={cn(
-                      "flex flex-col items-center gap-2 rounded-xl border px-4 py-3",
+                      "fixed inset-x-0 top-0 z-40 flex flex-col items-center gap-2 border-b px-4 py-3 shadow-lg backdrop-blur-xl sm:flex-row sm:justify-center",
                       hideFolder
-                        ? "border-brand/30 bg-brand/5"
-                        : "border-emerald-500/25 bg-emerald-500/10",
+                        ? "border-brand/40 bg-[rgba(10,10,12,0.95)]"
+                        : "border-emerald-500/30 bg-black/85",
                     )}
                   >
                     <AnimatePresence mode="wait">

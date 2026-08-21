@@ -1,42 +1,31 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import { FlowShell } from '@/components/flows/shared/flow-shell';
 import { useLanguage } from '@/components/marketing/language-context';
 import { Eyebrow } from '@/components/patterns/eyebrow';
-import { GlassPanel } from '@/components/patterns/glass-panel';
-import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { CosmicButton } from '@/components/ui/cosmic-button';
 import { BlueprintPreview } from './blueprint-preview';
 import { LoadingState } from './loading-state';
-import { getMockOpportunities } from './mock-data';
 import { OpportunityCard } from './opportunity-card';
 import { DeployGate } from './deploy-gate';
 import { FlowDashboard } from '@/components/flows/shared/flow-dashboard';
 import { CompanyCreating } from '@/components/flows/shared/company-creating';
-import { useSpawnFromOpportunity } from '@/src/hooks/useSpawnFromOpportunity';
 import type { FlowStep, Opportunity } from './types';
 
-const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
-
 export function LuckPage() {
-  const router = useRouter();
   const { t, language } = useLanguage();
   const o = t.flow.opportunity;
   const [step, setStep] = useState<FlowStep>('hero');
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [bankEmpty, setBankEmpty] = useState(false);
   const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
   const [creatingIdeaId, setCreatingIdeaId] = useState<string | null>(null);
-
-  const authHeaders = useMemo<Record<string, string>>(() => {
-    const headers: Record<string, string> = {};
-    if (DASHBOARD_TOKEN) headers['x-dashboard-token'] = DASHBOARD_TOKEN;
-    return headers;
-  }, []);
+  const [flowError, setFlowError] = useState<string | null>(null);
 
   const handleDeployComplete = useCallback((ideaId: string) => {
     setLinkedIdeaId(ideaId);
@@ -44,56 +33,99 @@ export function LuckPage() {
     setStep('creating');
   }, []);
 
-  const { spawnedSessionId, spawnError } = useSpawnFromOpportunity({
-    active: step === 'creating',
-    opportunity: selectedOpportunity,
-    ideaId: creatingIdeaId,
-    authHeaders,
-    intakeSource: 'rag_opportunity',
-  });
-
-  const startOpportunityFlow = useCallback(() => {
-    setSelectedOpportunity(null);
-    setLoadingMessageIndex(0);
-    // RAG integration boundary: replace this mock source through a validated
-    // server adapter. Contract: docs/CONTRATOS_INTEGRACION_FLUJOS.md.
-    setOpportunities(getMockOpportunities(language));
-    setStep('loading');
-  }, [language]);
-
+  // Ciclo de mensajes rotativos mientras step === 'loading' o 'loading-blueprint'.
   useEffect(() => {
-    if (step !== 'loading') return;
+    if (step !== 'loading' && step !== 'loading-blueprint') return;
 
     const messageInterval = window.setInterval(() => {
       setLoadingMessageIndex((prev) => (prev < o.loading.length - 1 ? prev + 1 : prev));
     }, 500);
 
-    const doneTimeout = window.setTimeout(() => {
-      setStep('opportunities');
-    }, 1500);
-
     return () => {
       window.clearInterval(messageInterval);
-      window.clearTimeout(doneTimeout);
     };
   }, [step, o.loading.length]);
 
-  const handleSelectOpportunity = (opportunity: Opportunity) => {
+  const startOpportunityFlow = useCallback(async () => {
+    setSelectedOpportunity(null);
+    setFlowError(null);
+    setBankEmpty(false);
+    setLoadingMessageIndex(0);
+    setStep('loading');
+
+    try {
+      const simulate = new URLSearchParams(window.location.search).get('simulate');
+      const qs = simulate ? `?simulate=${encodeURIComponent(simulate)}` : '';
+      const res = await fetch(`/api/opportunities/generate${qs}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        opportunities?: Opportunity[];
+        bankEmpty?: boolean;
+        error?: { message?: string };
+      };
+
+      if (!res.ok || !data.ok || !data.opportunities) {
+        throw new Error(data.error?.message || 'Could not generate opportunities');
+      }
+
+      if (data.bankEmpty || data.opportunities.length < 3) {
+        setBankEmpty(true);
+        setOpportunities([]);
+        setStep('empty-bank');
+        toast.warning(
+          language === 'es'
+            ? 'No quedan ideas disponibles en este momento.'
+            : 'No opportunities are available right now.',
+          { description: 'Vuelve a intentarlo en un momento.' }
+        );
+        return;
+      }
+
+      setOpportunities(data.opportunities.slice(0, 3));
+      setStep('opportunities');
+    } catch (err) {
+      setFlowError(err instanceof Error ? err.message : 'Could not generate opportunities');
+      setStep('hero');
+    }
+  }, [language]);
+
+  const handleSelectOpportunity = useCallback(async (opportunity: Opportunity) => {
     setSelectedOpportunity(opportunity);
-    setStep('blueprint');
-  };
+    setFlowError(null);
+    setLoadingMessageIndex(0);
+    setStep('loading-blueprint');
+
+    try {
+      const res = await fetch(`/api/opportunities/${encodeURIComponent(opportunity.id)}/blueprint`);
+      const data = (await res.json()) as {
+        ok?: boolean;
+        blueprint?: { markdown: string };
+        error?: { message?: string };
+      };
+
+      if (!res.ok || !data.ok || !data.blueprint) {
+        throw new Error(data.error?.message || 'Could not fetch blueprint');
+      }
+
+      setSelectedOpportunity({ ...opportunity, blueprint: data.blueprint });
+      setStep('blueprint');
+    } catch (err) {
+      setFlowError(err instanceof Error ? err.message : 'Could not fetch blueprint');
+      setStep('opportunities');
+    }
+  }, []);
 
   const handleRestart = () => {
     setStep('hero');
     setSelectedOpportunity(null);
     setLinkedIdeaId(null);
     setCreatingIdeaId(null);
+    setFlowError(null);
+    setBankEmpty(false);
   };
-
-  useEffect(() => {
-    if (step !== 'creating' || !spawnedSessionId) return;
-    router.push(`/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`);
-  }, [step, spawnedSessionId, router]);
 
   return (
     <FlowShell>
@@ -114,10 +146,11 @@ export function LuckPage() {
               </h1>
               <p className="mx-auto max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">{o.subtitle}</p>
             </div>
+            {flowError && <p className="text-sm text-rose-400">{flowError}</p>}
             <CosmicButton
               as="button"
               type="button"
-              onClick={startOpportunityFlow}
+              onClick={() => void startOpportunityFlow()}
               className="w-full max-w-xs sm:w-auto"
             >
               {o.cta}
@@ -128,6 +161,47 @@ export function LuckPage() {
         {step === 'loading' && (
           <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <LoadingState message={o.loading[loadingMessageIndex]} />
+          </motion.div>
+        )}
+
+        {step === 'loading-blueprint' && (
+          <motion.div key="loading-blueprint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <LoadingState message={o.loading[loadingMessageIndex]} />
+          </motion.div>
+        )}
+
+        {step === 'empty-bank' && (
+          <motion.div
+            key="empty-bank"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mx-auto max-w-md space-y-6 text-center"
+          >
+            <div className="space-y-3">
+              <p className="font-heading text-xs font-medium uppercase tracking-[0.14em] text-brand">
+                {o.resultsEyebrow}
+              </p>
+              <h2 className="text-3xl tracking-tight md:text-4xl">
+                {language === 'es' ? 'Hoy no quedan ideas' : 'No ideas left today'}
+              </h2>
+              <p className="text-muted-foreground">
+                {language === 'es'
+                  ? 'El banco de oportunidades está temporalmente agotado. Vuelve a intentarlo en un momento.'
+                  : 'The opportunity bank is temporarily empty. Try again in a moment.'}
+              </p>
+            </div>
+            {flowError && <p className="text-sm text-rose-400">{flowError}</p>}
+            <div className="flex justify-center">
+              <CosmicButton
+                as="button"
+                type="button"
+                onClick={() => void startOpportunityFlow()}
+                className="w-full max-w-xs sm:w-auto "
+              >
+                {language === 'es' ? 'Reintentar' : 'Try again'}
+              </CosmicButton>
+            </div>
           </motion.div>
         )}
 
@@ -144,13 +218,14 @@ export function LuckPage() {
               <h2 className="text-3xl tracking-tight md:text-4xl">{o.resultsTitle}</h2>
               <p className="text-muted-foreground">{o.resultsSubtitle}</p>
             </div>
+            {flowError && <p className="text-center text-sm text-rose-400">{flowError}</p>}
             <div className="grid gap-6 lg:grid-cols-3">
               {opportunities.map((opportunity, index) => (
                 <OpportunityCard
                   key={opportunity.id}
                   opportunity={opportunity}
                   index={index}
-                  onSelect={handleSelectOpportunity}
+                  onSelect={(opp) => void handleSelectOpportunity(opp)}
                 />
               ))}
             </div>
@@ -180,41 +255,11 @@ export function LuckPage() {
 
         {step === 'creating' && selectedOpportunity && (
           <motion.div key="creating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
-            {spawnError ? (
-              <GlassPanel className="mx-auto max-w-md space-y-4 p-6 text-center">
-                <h2 className="text-xl text-foreground">Almost there</h2>
-                <p className="text-sm text-muted-foreground">
-                  Your company <span className="text-brand">{selectedOpportunity.name}</span> was saved, but OpenClaw
-                  spawn failed.
-                </p>
-                <p className="text-xs text-rose-300">{spawnError}</p>
-                <MarketingBrandButton
-                  label="Open Agent Office anyway"
-                  href={
-                    spawnedSessionId
-                      ? `/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`
-                      : '/agents/office'
-                  }
-                  className="mx-auto"
-                />
-                <button
-                  type="button"
-                  onClick={() => setStep('dashboard')}
-                  className="text-sm text-brand hover:underline"
-                >
-                  Continue to summary
-                </button>
-              </GlassPanel>
-            ) : (
-              <CompanyCreating
-                companyName={selectedOpportunity.name}
-                durationMs={12_000}
-                onComplete={() => {
-                  if (!spawnedSessionId && !spawnError) return;
-                  if (!spawnedSessionId) setStep('dashboard');
-                }}
-              />
-            )}
+            <CompanyCreating
+              companyName={selectedOpportunity.name}
+              durationMs={12_000}
+              onComplete={() => setStep('dashboard')}
+            />
           </motion.div>
         )}
 
@@ -223,7 +268,6 @@ export function LuckPage() {
             <FlowDashboard
               companyName={selectedOpportunity.name}
               ideaId={linkedIdeaId ?? undefined}
-              sessionId={spawnedSessionId ?? undefined}
               onRestart={handleRestart}
             />
           </motion.div>

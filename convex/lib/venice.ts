@@ -58,7 +58,7 @@ async function callVeniceOnce(payload: {
   let lastStatus = 0;
 
   for (const key of keyCandidates) {
-    const res = await fetch(veniceUrl, {
+    const res: Response = await fetch(veniceUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

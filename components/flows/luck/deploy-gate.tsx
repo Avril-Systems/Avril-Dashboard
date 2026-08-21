@@ -3,12 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Wallet } from 'lucide-react';
 import { useWaaP } from '@/src/components/WaaPProvider';
-import { signInWithWallet } from '@/src/lib/establishWalletSession';
+import { clearWalletSession, signInWithWallet } from '@/src/lib/establishWalletSession';
 import { clearPersistedLuckSelection, persistLuckSelection } from '@/src/lib/luckIntake';
 import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { PaymentModule } from './payment-module';
 import type { Opportunity } from './types';
+import { hasIdeaBeenPaid, markIdeaPaid } from '@/src/lib/paidIdeas';
+
+// The old design bypass baked this fake address into a signed session cookie.
+// A wallet can never own it, so any session claiming it is stale — treat it as
+// not signed in and clear it so the user is forced through a real sign-in.
+const FAKE_BYPASS_WALLET = '0x0000000000000000000000000000000000dead';
 
 type GatePhase = 'sign-in' | 'linking' | 'payment';
 
@@ -36,7 +42,10 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opportunity }),
+      body: JSON.stringify({
+        opportunity,
+        intakeSource: flowSource === 'idea' ? 'form_intake' : 'rag_opportunity',
+      }),
     });
     const data = (await res.json()) as {
       ok?: boolean;
@@ -49,7 +58,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     ideaIdRef.current = data.ideaId;
     setIdeaId(data.ideaId);
     return data.ideaId;
-  }, [opportunity]);
+  }, [opportunity, flowSource]);
 
   useEffect(() => {
     persistLuckSelection(opportunity);
@@ -60,8 +69,16 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     let cancelled = false;
 
     async function resume() {
-      const session = await refreshWalletSession();
+      let session = await refreshWalletSession();
       if (cancelled) return;
+
+      // Stale fake session from the removed design bypass: never treat it as a
+      // real sign-in. Clear it and ask the user to authenticate properly.
+      if (session?.address?.toLowerCase() === FAKE_BYPASS_WALLET) {
+        await clearWalletSession().catch(() => null);
+        session = null;
+      }
+
       if (!session) {
         setPhase('sign-in');
         return;
@@ -71,10 +88,11 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
       try {
         const freshIdeaId = await saveSelection();
         if (cancelled) return;
-        // TODO(billing): session.plan is a demo shortcut, not a reusable deploy entitlement.
+        // session.plan is informational UX metadata only — it must NEVER authorize
+        // a free deploy. Every company pays: one company = one checkout.
         // Production rule: one company deploy = one deploymentIntent + one checkout.
         // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
-        if (session.plan) {
+        if (session.plan && hasIdeaBeenPaid(freshIdeaId)) {
           onCompleteRef.current(freshIdeaId);
         } else {
           setPhase('payment');
@@ -115,6 +133,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     clearPersistedLuckSelection();
     try {
       const id = ideaIdRef.current ?? (await saveSelection());
+      markIdeaPaid(id);
       onCompleteRef.current(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not continue after payment');
@@ -140,6 +159,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
         companyName={opportunity.name}
         flowSource={flowSource}
         ideaId={ideaId ?? undefined}
+        opportunityId={flowSource === 'opportunity' ? opportunity.id : undefined}
         onComplete={() => void handlePaymentComplete()}
       />
     );

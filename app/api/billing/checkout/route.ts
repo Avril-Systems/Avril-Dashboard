@@ -7,13 +7,21 @@ import {
   refreshSessionToken,
 } from '@/src/lib/sessionAuth';
 import { createStripeCheckoutSession } from '@/src/lib/stripeCheckout';
-import { getAppOrigin, isStripeCheckoutEnabled } from '@/src/lib/stripe';
+import { getAppOrigin, getStripe, isStripeCheckoutEnabled } from '@/src/lib/stripe';
+import {
+  attachCheckoutSession,
+  cancelDeploymentIntent,
+  createDeploymentIntent,
+  getDeploymentIntentByOpportunity,
+} from '@/src/lib/convexServer';
 
 type CheckoutBody = {
   planId?: DeploymentPlanId;
   companyName?: string;
   flowSource?: string;
   ideaId?: string;
+  opportunityId?: string;
+  deploymentIntentId?: string;
 };
 
 export async function GET() {
@@ -61,12 +69,75 @@ export async function POST(req: Request) {
       );
     }
 
-    // DEMO ONLY: this still falls back to cookie state. Production billing must
-    // create a persisted deploymentIntent per company and confirm it by webhook.
-    // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
+    // The idea the checkout will pay for: explicit body value or the cookie link.
     const linkedIdeaId = body.ideaId?.trim() || session.luckIdeaId!;
 
     const origin = getAppOrigin(req);
+
+    // One company = one deploy = one checkout. The deploymentIntent is the
+    // server-side record that this checkout will pay for this company; it also
+    // becomes the Stripe idempotency key so a double-click never creates two
+    // chargeable sessions. Degrades to null when Convex is unavailable (dev).
+    let deploymentIntentId: string | undefined;
+
+    // Already paid? If this wallet already paid for this RAG opportunity, DO NOT
+    // create a new chargeable checkout — reuse the paid session instead. The Stripe
+    // idempotency key would otherwise return the SAME (possibly expired) session URL,
+    // landing the user on Stripe's terminal "All set here" page forever. The intent's
+    // Convex status is NOT authoritative here: a paid session may still be recorded
+    // as `checkout_pending` when the webhook didn't fire, so we always check Stripe.
+    const opportunityId = body.opportunityId?.trim();
+    if (opportunityId) {
+      try {
+        const existingIntent = await getDeploymentIntentByOpportunity({
+          opportunityId,
+          founderWallet: session.address,
+        });
+        if (existingIntent?.stripeCheckoutSessionId) {
+          const session = await getStripe().checkout.sessions.retrieve(
+            existingIntent.stripeCheckoutSessionId
+          );
+          const isPaid =
+            session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
+          if (isPaid) {
+            return NextResponse.json({
+              ok: true,
+              mode: 'stripe',
+              planId: plan.id,
+              companyName,
+              flowSource,
+              ideaId: linkedIdeaId,
+              alreadyPaid: true,
+              sessionId: existingIntent.stripeCheckoutSessionId,
+              checkoutUrl: null,
+            });
+          }
+          // Not paid and terminal (expired): the dedup in createDeploymentIntent would
+          // hand us the SAME intent id, and the Stripe idempotency key would then return
+          // the SAME (expired) session URL forever. Supersede it so a fresh chargeable
+          // checkout is issued.
+          if (session.status === 'expired') {
+            await cancelDeploymentIntent({ intentId: existingIntent._id }).catch(() => null);
+          }
+        }
+      } catch {
+        /* Convex unavailable → fall through to a normal checkout */
+      }
+    }
+
+    try {
+      deploymentIntentId =
+        body.deploymentIntentId?.trim() ||
+        ((await createDeploymentIntent({
+          source: flowSource === 'form_intake' ? 'form_intake' : 'rag_opportunity',
+          companyName,
+          opportunityId,
+          founderWallet: session.address,
+          planId: plan.id,
+        })) as string);
+    } catch {
+      deploymentIntentId = undefined;
+    }
 
     if (isStripeCheckoutEnabled()) {
       const checkoutSession = await createStripeCheckoutSession({
@@ -75,7 +146,21 @@ export async function POST(req: Request) {
         flowSource,
         origin,
         ideaId: linkedIdeaId,
+        opportunityId: body.opportunityId?.trim(),
+        deploymentIntentId,
       });
+
+      if (deploymentIntentId && checkoutSession.id) {
+        try {
+          await attachCheckoutSession({
+            intentId: deploymentIntentId,
+            stripeCheckoutSessionId: checkoutSession.id,
+            planId: plan.id,
+          });
+        } catch {
+          /* webhook will reconcile via metadata/client_reference_id if attach failed */
+        }
+      }
 
       const token = refreshSessionToken(session, { plan: plan.id, luckIdeaId: linkedIdeaId });
       if (!token) {
@@ -89,6 +174,7 @@ export async function POST(req: Request) {
         companyName,
         flowSource,
         ideaId: linkedIdeaId,
+        deploymentIntentId,
         checkoutUrl: checkoutSession.url,
         sessionId: checkoutSession.id,
       });
@@ -106,6 +192,7 @@ export async function POST(req: Request) {
       mode: 'mock',
       planId: plan.id,
       ideaId: linkedIdeaId,
+      deploymentIntentId,
       checkoutUrl: null,
     });
     res.headers.append('Set-Cookie', buildSessionCookie(token));

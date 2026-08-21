@@ -26,9 +26,9 @@ function requireServerSecret(): string {
 
 async function resolveState(ctx: any, ideaId?: string) {
   const serverSecret = requireServerSecret();
-  const organizationId = await ctx.runQuery((api as any).bootstrap.getDefaultOrganizationId, { serverSecret });
+  const organizationId: any = await ctx.runQuery((api as any).bootstrap.getDefaultOrganizationId, { serverSecret });
   if (!organizationId) throw new Error('No default organization found.');
-  const state = await ctx.runQuery((api as any).serverControlPlane.getControlPlaneStateServer, {
+  const state: any = await ctx.runQuery((api as any).serverControlPlane.getControlPlaneStateServer, {
     organizationId,
     serverSecret,
   });
@@ -148,7 +148,7 @@ export const generateBusinessBlueprint = action({
       selectedRoute: state.selectedRoute,
     });
 
-    const result = await callVeniceStructured({
+    const result: any = await callVeniceStructured({
       schema: BusinessBlueprintSchema,
       system: prompt.system,
       user: prompt.user,
@@ -160,7 +160,7 @@ export const generateBusinessBlueprint = action({
       throw err;
     });
 
-    const blueprintId = await ctx.runMutation((api as any).serverFounder.createBusinessBlueprintServer, {
+    const blueprintId: any = await ctx.runMutation((api as any).serverFounder.createBusinessBlueprintServer, {
       ideaId: state.currentIdea._id,
       routeId: state.selectedRoute._id,
       selectedCompanyStructure: result.parsed.companyStructure,

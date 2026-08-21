@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Jura:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&family=Share+Tech+Mono:wght@400&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* ========== Design tokens & themes (Avril Dashboard) ========== */
 :root {
@@ -445,6 +446,16 @@ a:focus-visible {
 .chat-markdown ul,
 .chat-markdown ol {
   margin: 0.4rem 0 0.4rem 1rem;
+}
+
+.chat-markdown ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.chat-markdown ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
 }
 
 .chat-markdown li {
