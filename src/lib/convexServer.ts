@@ -1,15 +1,19 @@
-import { ConvexHttpClient } from 'convex/browser';
+import { ConvexHttpClient } from "convex/browser";
 
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
 const SERVER_SECRET = process.env.CONVEX_SERVER_SECRET;
 
 function getClient(): ConvexHttpClient {
-  if (!CONVEX_URL) throw new Error('Missing Convex URL (NEXT_PUBLIC_CONVEX_URL or CONVEX_URL).');
+  if (!CONVEX_URL)
+    throw new Error(
+      "Missing Convex URL (NEXT_PUBLIC_CONVEX_URL or CONVEX_URL).",
+    );
   return new ConvexHttpClient(CONVEX_URL);
 }
 
 function requireServerSecret(): string {
-  if (!SERVER_SECRET) throw new Error('Missing CONVEX_SERVER_SECRET in server environment.');
+  if (!SERVER_SECRET)
+    throw new Error("Missing CONVEX_SERVER_SECRET in server environment.");
   return SERVER_SECRET;
 }
 
@@ -21,17 +25,23 @@ export async function getDefaultOrganizationId(): Promise<string> {
   const client = getClient();
   const serverSecret = requireServerSecret();
 
-  let orgId: string | null = await (client as any).query('bootstrap:getDefaultOrganizationId', {
-    serverSecret,
-  });
+  let orgId: string | null = await (client as any).query(
+    "bootstrap:getDefaultOrganizationId",
+    {
+      serverSecret,
+    },
+  );
 
   if (orgId == null) {
-    orgId = await (client as any).mutation('bootstrap:createDefaultOrganizationIfMissing', {
-      serverSecret,
-    });
+    orgId = await (client as any).mutation(
+      "bootstrap:createDefaultOrganizationIfMissing",
+      {
+        serverSecret,
+      },
+    );
   }
 
-  if (!orgId) throw new Error('Failed to resolve default organization.');
+  if (!orgId) throw new Error("Failed to resolve default organization.");
   return orgId;
 }
 
@@ -43,15 +53,16 @@ export async function getDefaultOrganizationId(): Promise<string> {
 export async function createChat(args: {
   title?: string;
   organizationId?: string;
-  area?: 'Research' | 'Ops' | 'General';
-  subArea?: 'Grants' | 'Competitors' | 'Deploy' | 'Alerts';
+  area?: "Research" | "Ops" | "General";
+  subArea?: "Grants" | "Competitors" | "Deploy" | "Alerts";
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args.organizationId ?? (await getDefaultOrganizationId());
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
 
-  return await (client as any).mutation('serverChats:createChatServer', {
-    title: args.title ?? 'New Chat',
+  return await (client as any).mutation("serverChats:createChatServer", {
+    title: args.title ?? "New Chat",
     organizationId,
     serverSecret,
     area: args.area,
@@ -62,7 +73,7 @@ export async function createChat(args: {
 export async function updateChatTitle(args: { chatId: string; title: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverChats:updateChatTitleServer', {
+  return await (client as any).mutation("serverChats:updateChatTitleServer", {
     chatId: args.chatId,
     title: args.title,
     serverSecret,
@@ -75,9 +86,10 @@ export async function updateChatTitle(args: { chatId: string; title: string }) {
 export async function listChats(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args.organizationId ?? (await getDefaultOrganizationId());
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
 
-  return await (client as any).query('serverChats:listChatsServer', {
+  return await (client as any).query("serverChats:listChatsServer", {
     organizationId,
     serverSecret,
   });
@@ -89,9 +101,10 @@ export async function listChats(args: { organizationId?: string }) {
 export async function listAgents(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args.organizationId ?? (await getDefaultOrganizationId());
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
 
-  return await (client as any).query('serverChats:listAgentsServer', {
+  return await (client as any).query("serverChats:listAgentsServer", {
     organizationId,
     serverSecret,
   });
@@ -108,7 +121,7 @@ export async function sendMessage(args: {
   const client = getClient();
   const serverSecret = requireServerSecret();
 
-  return await (client as any).mutation('serverChats:sendMessageServer', {
+  return await (client as any).mutation("serverChats:sendMessageServer", {
     chatId: args.chatId,
     content: args.content,
     authorId: args.authorId,
@@ -127,10 +140,10 @@ export async function sendAgentMessage(args: {
   const client = getClient();
   const serverSecret = requireServerSecret();
 
-  return await (client as any).mutation('serverChats:sendAgentMessageServer', {
+  return await (client as any).mutation("serverChats:sendAgentMessageServer", {
     chatId: args.chatId,
     content: args.content,
-    authorId: args.authorId ?? 'AvrilAgent',
+    authorId: args.authorId ?? "AvrilAgent",
     serverSecret,
   });
 }
@@ -142,14 +155,25 @@ export async function listMessages(args: { chatId: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
 
-  return await (client as any).query('serverChats:listMessagesServer', {
+  return await (client as any).query("serverChats:listMessagesServer", {
     chatId: args.chatId,
     serverSecret,
   });
 }
 
-export type OrchestrationSessionStatus = 'queued' | 'spawning' | 'active' | 'failed' | 'completed';
-export type OrchestrationAgentStatus = 'spawning' | 'idle' | 'working' | 'blocked' | 'completed' | 'error';
+export type OrchestrationSessionStatus =
+  | "queued"
+  | "spawning"
+  | "active"
+  | "failed"
+  | "completed";
+export type OrchestrationAgentStatus =
+  | "spawning"
+  | "idle"
+  | "working"
+  | "blocked"
+  | "completed"
+  | "error";
 
 export async function createOrchestrationSession(args: {
   organizationId?: string;
@@ -159,23 +183,45 @@ export async function createOrchestrationSession(args: {
   spawnRequestId?: string;
   vpsRef?: string;
   containerRef?: string;
+  endpointUrl?: string;
+  opportunityId?: string;
   error?: string;
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args.organizationId ?? (await getDefaultOrganizationId());
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
 
-  return await (client as any).mutation('serverOrchestration:createSessionServer', {
-    organizationId,
-    chatId: args.chatId,
-    companyName: args.companyName,
-    status: args.status,
-    spawnRequestId: args.spawnRequestId,
-    vpsRef: args.vpsRef,
-    containerRef: args.containerRef,
-    error: args.error,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverOrchestration:createSessionServer",
+    {
+      organizationId,
+      chatId: args.chatId,
+      companyName: args.companyName,
+      status: args.status,
+      spawnRequestId: args.spawnRequestId,
+      vpsRef: args.vpsRef,
+      containerRef: args.containerRef,
+      endpointUrl: args.endpointUrl,
+      opportunityId: args.opportunityId,
+      error: args.error,
+      serverSecret,
+    },
+  );
+}
+
+export async function getOrchestrationSessionByOpportunity(args: {
+  opportunityId: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query(
+    "serverOrchestration:getSessionByOpportunityServer",
+    {
+      opportunityId: args.opportunityId,
+      serverSecret,
+    },
+  );
 }
 
 export async function setOrchestrationSessionStatus(args: {
@@ -184,20 +230,25 @@ export async function setOrchestrationSessionStatus(args: {
   spawnRequestId?: string;
   vpsRef?: string;
   containerRef?: string;
+  endpointUrl?: string;
   error?: string;
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
 
-  return await (client as any).mutation('serverOrchestration:setSessionStatusServer', {
-    sessionId: args.sessionId,
-    status: args.status,
-    spawnRequestId: args.spawnRequestId,
-    vpsRef: args.vpsRef,
-    containerRef: args.containerRef,
-    error: args.error,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverOrchestration:setSessionStatusServer",
+    {
+      sessionId: args.sessionId,
+      status: args.status,
+      spawnRequestId: args.spawnRequestId,
+      vpsRef: args.vpsRef,
+      containerRef: args.containerRef,
+      endpointUrl: args.endpointUrl,
+      error: args.error,
+      serverSecret,
+    },
+  );
 }
 
 export async function appendOrchestrationEvent(args: {
@@ -207,12 +258,15 @@ export async function appendOrchestrationEvent(args: {
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverOrchestration:appendSessionEventServer', {
-    sessionId: args.sessionId,
-    type: args.type,
-    payload: args.payload,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverOrchestration:appendSessionEventServer",
+    {
+      sessionId: args.sessionId,
+      type: args.type,
+      payload: args.payload,
+      serverSecret,
+    },
+  );
 }
 
 export async function upsertOrchestrationAgents(args: {
@@ -230,11 +284,14 @@ export async function upsertOrchestrationAgents(args: {
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverOrchestration:upsertAgentsSnapshotServer', {
-    sessionId: args.sessionId,
-    agents: args.agents,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverOrchestration:upsertAgentsSnapshotServer",
+    {
+      sessionId: args.sessionId,
+      agents: args.agents,
+      serverSecret,
+    },
+  );
 }
 
 export async function updateOrchestrationAgentStatus(args: {
@@ -248,81 +305,120 @@ export async function updateOrchestrationAgentStatus(args: {
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverOrchestration:updateAgentStatusServer', {
-    sessionId: args.sessionId,
-    agentKey: args.agentKey,
-    status: args.status,
-    name: args.name,
-    role: args.role,
-    parentAgentKey: args.parentAgentKey,
-    meta: args.meta,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverOrchestration:updateAgentStatusServer",
+    {
+      sessionId: args.sessionId,
+      agentKey: args.agentKey,
+      status: args.status,
+      name: args.name,
+      role: args.role,
+      parentAgentKey: args.parentAgentKey,
+      meta: args.meta,
+      serverSecret,
+    },
+  );
 }
 
 export async function getOrchestrationSession(args: { sessionId: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).query('serverOrchestration:getSessionServer', {
+  return await (client as any).query("serverOrchestration:getSessionServer", {
     sessionId: args.sessionId,
     serverSecret,
   });
+}
+
+/** Admin: delete a terminal-failed orchestration session so a paid session can re-deploy cleanly. */
+export async function deleteSessionForRedeploy(args: { sessionId: string }) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverOrchestration:deleteSessionForRedeployServer",
+    {
+      sessionId: args.sessionId,
+      serverSecret,
+    },
+  );
 }
 
 export async function getOrchestrationSessionByChat(args: { chatId: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).query('serverOrchestration:getSessionByChatServer', {
-    chatId: args.chatId,
-    serverSecret,
-  });
+  return await (client as any).query(
+    "serverOrchestration:getSessionByChatServer",
+    {
+      chatId: args.chatId,
+      serverSecret,
+    },
+  );
 }
 
 export async function listOrchestrationAgents(args: { sessionId: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).query('serverOrchestration:listSessionAgentsServer', {
-    sessionId: args.sessionId,
-    serverSecret,
-  });
+  return await (client as any).query(
+    "serverOrchestration:listSessionAgentsServer",
+    {
+      sessionId: args.sessionId,
+      serverSecret,
+    },
+  );
 }
 
-export async function listOrchestrationEvents(args: { sessionId: string; limit?: number }) {
+export async function listOrchestrationEvents(args: {
+  sessionId: string;
+  limit?: number;
+}) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).query('serverOrchestration:listSessionEventsServer', {
-    sessionId: args.sessionId,
-    limit: args.limit,
-    serverSecret,
-  });
+  return await (client as any).query(
+    "serverOrchestration:listSessionEventsServer",
+    {
+      sessionId: args.sessionId,
+      limit: args.limit,
+      serverSecret,
+    },
+  );
 }
 
-export async function listOrchestrationSessions(args?: { organizationId?: string; limit?: number }) {
+export async function listOrchestrationSessions(args?: {
+  organizationId?: string;
+  limit?: number;
+}) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args?.organizationId ?? (await getDefaultOrganizationId());
-  return await (client as any).query('serverOrchestration:listSessionsByOrgServer', {
-    organizationId,
-    limit: args?.limit,
-    serverSecret,
-  });
+  const organizationId =
+    args?.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).query(
+    "serverOrchestration:listSessionsByOrgServer",
+    {
+      organizationId,
+      limit: args?.limit,
+      serverSecret,
+    },
+  );
 }
 
 export async function getControlPlaneState(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args.organizationId ?? (await getDefaultOrganizationId());
-  return await (client as any).query('serverControlPlane:getControlPlaneStateServer', {
-    organizationId,
-    serverSecret,
-  });
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).query(
+    "serverControlPlane:getControlPlaneStateServer",
+    {
+      organizationId,
+      serverSecret,
+    },
+  );
 }
 
 export async function ensureWalletUser(walletAddress: string): Promise<string> {
   const client = getClient();
   const serverSecret = requireServerSecret();
   const normalized = walletAddress.trim().toLowerCase();
-  return await (client as any).mutation('serverUsers:ensureWalletUserServer', {
+  return await (client as any).mutation("serverUsers:ensureWalletUserServer", {
     walletAddress: normalized,
     serverSecret,
   });
@@ -348,78 +444,97 @@ export async function createFounderIdea(args: {
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args.organizationId ?? (await getDefaultOrganizationId());
-  return await (client as any).mutation('serverFounder:createFounderIdeaServer', {
-    organizationId,
-    founderUserId: args.founderUserId,
-    founderWallet: args.founderWallet,
-    title: args.title,
-    ideaText: args.ideaText,
-    targetUser: args.targetUser,
-    problem: args.problem,
-    monetizationPreference: args.monetizationPreference,
-    businessModelPreference: args.businessModelPreference,
-    desiredAutomationLevel: args.desiredAutomationLevel,
-    skillsResources: args.skillsResources,
-    timeAvailable: args.timeAvailable,
-    country: args.country,
-    language: args.language,
-    channelPreferences: args.channelPreferences,
-    riskTolerance: args.riskTolerance,
-    serverSecret,
-  });
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).mutation(
+    "serverFounder:createFounderIdeaServer",
+    {
+      organizationId,
+      founderUserId: args.founderUserId,
+      founderWallet: args.founderWallet,
+      title: args.title,
+      ideaText: args.ideaText,
+      targetUser: args.targetUser,
+      problem: args.problem,
+      monetizationPreference: args.monetizationPreference,
+      businessModelPreference: args.businessModelPreference,
+      desiredAutomationLevel: args.desiredAutomationLevel,
+      skillsResources: args.skillsResources,
+      timeAvailable: args.timeAvailable,
+      country: args.country,
+      language: args.language,
+      channelPreferences: args.channelPreferences,
+      riskTolerance: args.riskTolerance,
+      serverSecret,
+    },
+  );
 }
 
 export async function selectCompanyOption(args: {
   ideaId: string;
   selectedOptionKey: string;
-  selectedProfile: 'conservative' | 'balanced' | 'ambitious';
+  selectedProfile: "conservative" | "balanced" | "ambitious";
   rationale?: string;
   selectedByUserId?: string;
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverFounder:selectCompanyOptionServer', {
-    ideaId: args.ideaId,
-    selectedOptionKey: args.selectedOptionKey,
-    selectedProfile: args.selectedProfile,
-    rationale: args.rationale,
-    selectedByUserId: args.selectedByUserId,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverFounder:selectCompanyOptionServer",
+    {
+      ideaId: args.ideaId,
+      selectedOptionKey: args.selectedOptionKey,
+      selectedProfile: args.selectedProfile,
+      rationale: args.rationale,
+      selectedByUserId: args.selectedByUserId,
+      serverSecret,
+    },
+  );
 }
 
 export async function generateFounderBrief(args: { ideaId?: string }) {
   const client = getClient();
-  return await (client as any).action('founderGeneration:generateFounderBrief', {
-    ideaId: args.ideaId,
-  });
+  return await (client as any).action(
+    "founderGeneration:generateFounderBrief",
+    {
+      ideaId: args.ideaId,
+    },
+  );
 }
 
 export async function generateCompanyOptions(args: { ideaId?: string }) {
   const client = getClient();
-  return await (client as any).action('founderGeneration:generateCompanyOptions', {
-    ideaId: args.ideaId,
-  });
+  return await (client as any).action(
+    "founderGeneration:generateCompanyOptions",
+    {
+      ideaId: args.ideaId,
+    },
+  );
 }
 
 export async function generateBusinessBlueprint(args: { ideaId?: string }) {
   const client = getClient();
-  return await (client as any).action('founderGeneration:generateBusinessBlueprint', {
-    ideaId: args.ideaId,
-  });
+  return await (client as any).action(
+    "founderGeneration:generateBusinessBlueprint",
+    {
+      ideaId: args.ideaId,
+    },
+  );
 }
 
 export async function generateIgnitionPrompt(args: { ideaId?: string }) {
   const client = getClient();
-  return await (client as any).action('founderGeneration:generateIgnitionPrompt', {
-    ideaId: args.ideaId,
-  });
+  return await (client as any).action(
+    "founderGeneration:generateIgnitionPrompt",
+    {
+      ideaId: args.ideaId,
+    },
+  );
 }
 
 export async function deployOpenClawInstance(args: { ideaId?: string }) {
   const client = getClient();
-  return await (client as any).action('deployments:deployOpenClawInstance', {
+  return await (client as any).action("deployments:deployOpenClawInstance", {
     ideaId: args.ideaId,
   });
 }
@@ -432,40 +547,52 @@ export async function upsertChatIgnitionDraft(args: {
   ignitionPrompt?: string;
   handoffPayload?: unknown;
   lastArchitectPayload?: unknown;
-  nextStatus: 'collecting' | 'ready';
+  nextStatus: "collecting" | "ready";
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverChatIgnition:upsertChatIgnitionDraftServer', {
-    organizationId: args.organizationId,
-    chatId: args.chatId,
-    serverSecret,
-    phase: args.phase,
-    captured: args.captured,
-    ignitionPrompt: args.ignitionPrompt,
-    handoffPayload: args.handoffPayload,
-    lastArchitectPayload: args.lastArchitectPayload,
-    nextStatus: args.nextStatus,
-  });
+  return await (client as any).mutation(
+    "serverChatIgnition:upsertChatIgnitionDraftServer",
+    {
+      organizationId: args.organizationId,
+      chatId: args.chatId,
+      serverSecret,
+      phase: args.phase,
+      captured: args.captured,
+      ignitionPrompt: args.ignitionPrompt,
+      handoffPayload: args.handoffPayload,
+      lastArchitectPayload: args.lastArchitectPayload,
+      nextStatus: args.nextStatus,
+    },
+  );
 }
 
 export async function getChatIgnitionDraft(args: { chatId: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).query('serverChatIgnition:getChatIgnitionDraftServer', {
-    chatId: args.chatId,
-    serverSecret,
-  });
+  return await (client as any).query(
+    "serverChatIgnition:getChatIgnitionDraftServer",
+    {
+      chatId: args.chatId,
+      serverSecret,
+    },
+  );
 }
 
-export async function markChatIgnitionSpawned(args: { chatId: string; sessionId: string }) {
+export async function markChatIgnitionSpawned(args: {
+  chatId: string;
+  sessionId: string;
+}) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  return await (client as any).mutation('serverChatIgnition:markChatIgnitionSpawnedServer', {
-    chatId: args.chatId,
-    sessionId: args.sessionId,
-    serverSecret,
-  });
+  return await (client as any).mutation(
+    "serverChatIgnition:markChatIgnitionSpawnedServer",
+    {
+      chatId: args.chatId,
+      sessionId: args.sessionId,
+      serverSecret,
+    },
+  );
 }
 
 export async function healOrchestrationSessionNames(args?: {
@@ -474,10 +601,213 @@ export async function healOrchestrationSessionNames(args?: {
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
-  const organizationId = args?.organizationId ?? (await getDefaultOrganizationId());
-  return await (client as any).mutation('serverOrchestration:healSessionDisplayNamesServer', {
-    organizationId,
-    limit: args?.limit,
-    serverSecret,
-  });
+  const organizationId =
+    args?.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).mutation(
+    "serverOrchestration:healSessionDisplayNamesServer",
+    {
+      organizationId,
+      limit: args?.limit,
+      serverSecret,
+    },
+  );
+}
+
+export type DeploymentIntentSource =
+  | "form_intake"
+  | "chat_intake"
+  | "rag_opportunity";
+export type DeploymentIntentStatus =
+  | "draft"
+  | "checkout_pending"
+  | "paid"
+  | "spawning"
+  | "deployed"
+  | "failed"
+  | "cancelled";
+
+export async function createDeploymentIntent(args: {
+  organizationId?: string;
+  source: DeploymentIntentSource;
+  companyName: string;
+  opportunityId?: string;
+  founderWallet?: string;
+  founderUserId?: string;
+  founderIdeaId?: string;
+  chatId?: string;
+  planId?: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const organizationId =
+    args.organizationId ?? (await getDefaultOrganizationId());
+  return await (client as any).mutation(
+    "serverBilling:createDeploymentIntentServer",
+    {
+      organizationId,
+      source: args.source,
+      companyName: args.companyName,
+      opportunityId: args.opportunityId,
+      founderWallet: args.founderWallet,
+      founderUserId: args.founderUserId,
+      founderIdeaId: args.founderIdeaId,
+      chatId: args.chatId,
+      planId: args.planId,
+      serverSecret,
+    },
+  );
+}
+
+export async function attachCheckoutSession(args: {
+  intentId: string;
+  stripeCheckoutSessionId: string;
+  planId?: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:attachCheckoutSessionServer",
+    {
+      intentId: args.intentId,
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      planId: args.planId,
+      serverSecret,
+    },
+  );
+}
+
+export async function markDeploymentIntentPaid(args: {
+  stripeCheckoutSessionId: string;
+  stripePaymentIntentId?: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:markDeploymentIntentPaidServer",
+    {
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      stripePaymentIntentId: args.stripePaymentIntentId,
+      serverSecret,
+    },
+  );
+}
+
+export async function consumeDeploymentIntent(args: {
+  stripeCheckoutSessionId: string;
+  opportunityId?: string;
+  companyName?: string;
+}): Promise<{
+  found: boolean;
+  consumed: boolean;
+  status: DeploymentIntentStatus | null;
+}> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:consumeDeploymentIntentServer",
+    {
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      opportunityId: args.opportunityId,
+      companyName: args.companyName,
+      serverSecret,
+    },
+  );
+}
+
+export async function releaseDeploymentIntent(args: {
+  stripeCheckoutSessionId: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:releaseDeploymentIntentServer",
+    {
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      serverSecret,
+    },
+  );
+}
+
+export async function getDeploymentIntentBySession(args: {
+  stripeCheckoutSessionId: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query(
+    "serverBilling:getDeploymentIntentBySessionServer",
+    {
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      serverSecret,
+    },
+  );
+}
+
+export async function getDeploymentIntentByOpportunity(args: {
+  opportunityId: string;
+  founderWallet?: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query(
+    "serverBilling:getDeploymentIntentByOpportunityServer",
+    {
+      opportunityId: args.opportunityId,
+      founderWallet: args.founderWallet,
+      serverSecret,
+    },
+  );
+}
+
+export async function cancelDeploymentIntent(args: { intentId: string }) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:cancelDeploymentIntentServer",
+    {
+      intentId: args.intentId,
+      serverSecret,
+    },
+  );
+}
+
+export async function listPaidIntentsForWallet(args: {
+  founderWallet: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query(
+    "serverBilling:listPaidIntentsForWalletServer",
+    {
+      founderWallet: args.founderWallet,
+      serverSecret,
+    },
+  );
+}
+
+export async function linkOrchestrationSession(args: {
+  intentId: string;
+  orchestrationSessionId: string;
+}) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:linkOrchestrationSessionServer",
+    {
+      intentId: args.intentId,
+      orchestrationSessionId: args.orchestrationSessionId,
+      serverSecret,
+    },
+  );
+}
+
+export async function sweepStaleSpawningForWallet(args: { founderWallet: string }) {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation(
+    "serverBilling:sweepStaleSpawningForWalletServer",
+    {
+      founderWallet: args.founderWallet,
+      serverSecret,
+    },
+  );
 }

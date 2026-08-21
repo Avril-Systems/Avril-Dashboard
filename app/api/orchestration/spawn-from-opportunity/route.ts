@@ -7,6 +7,8 @@ import {
 } from '@/src/lib/convexServer';
 import { runOpenClawSpawn } from '@/src/lib/runOpenClawSpawn';
 import type { Opportunity } from '@/components/flows/luck/types';
+import { isMarkdownBlueprint } from '@/components/flows/luck/types';
+import { BLUEPRINT_MAX_CHARS } from '@/src/lib/blueprintUtils';
 
 type SpawnFromOpportunityBody = {
   opportunity?: Opportunity;
@@ -18,7 +20,7 @@ type SpawnFromOpportunityBody = {
 
 function buildIgnitionPrompt(opportunity: Opportunity): string {
   const bp = opportunity.blueprint;
-  return [
+  const header = [
     `# ${opportunity.name}`,
     '',
     `Company: ${opportunity.name}`,
@@ -28,22 +30,41 @@ function buildIgnitionPrompt(opportunity: Opportunity): string {
     `Ideal customer: ${opportunity.idealClient}`,
     `Monetization speed: ${opportunity.monetizationSpeed}`,
     `Agents: ${(opportunity.agents ?? []).join(', ')}`,
-    '',
-    '## Blueprint summary',
-    bp.summary,
-    '',
-    '## Offer',
-    bp.offer,
-    '',
-    '## Ideal customer',
-    bp.idealCustomer,
-    '',
-    '## First steps',
-    ...(bp.steps ?? []).map((s, i) => `${i + 1}. ${s}`),
-    '',
-    '## Risks',
-    ...(bp.risks ?? []).map((r) => `- ${r}`),
-  ].join('\n');
+  ];
+
+  if (bp && isMarkdownBlueprint(bp)) {
+    const documentSection = bp.markdown.trim().slice(0, BLUEPRINT_MAX_CHARS);
+    return [...header, '', '## Documento de identidad', documentSection].join('\n');
+  }
+
+  if (bp) {
+    return [
+      ...header,
+      '',
+      '## Blueprint summary',
+      bp.summary,
+      '',
+      '## Offer',
+      bp.offer,
+      '',
+      '## Ideal customer',
+      bp.idealCustomer,
+      '',
+      '## First steps',
+      ...(bp.steps ?? []).map((s, i) => `${i + 1}. ${s}`),
+      '',
+      '## Agents',
+      ...(bp.agents ?? []).map((a) => `- ${a}`),
+      '',
+      '## Risks',
+      ...(bp.risks ?? []).map((r) => `- ${r}`),
+      '',
+      '## Deploy cost',
+      bp.deployCost,
+    ].join('\n');
+  }
+
+  return header.join('\n');
 }
 
 export async function POST(req: Request) {
@@ -58,7 +79,7 @@ export async function POST(req: Request) {
         { status: 429 }
       );
     }
-    if (rejectLargePayload(req, 64 * 1024)) {
+    if (rejectLargePayload(req, 256 * 1024)) {
       return NextResponse.json(
         { ok: false, error: { code: 'PAYLOAD_TOO_LARGE', message: 'Payload too large' } },
         { status: 413 }

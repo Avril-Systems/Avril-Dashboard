@@ -1,56 +1,80 @@
-import { defineSchema, defineTable } from 'convex/server';
-import { v } from 'convex/values';
-import { areaValidator, subAreaValidator } from './lib/agentAreas';
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+import { areaValidator, subAreaValidator } from "./lib/agentAreas";
 
 export default defineSchema({
-  users: defineTable({ email: v.string(), walletAddress: v.optional(v.string()), createdAt: v.string() })
-    .index('by_email', ['email'])
-    .index('by_wallet', ['walletAddress']),
-  organizations: defineTable({ name: v.string(), slug: v.string(), createdAt: v.string() }).index('by_slug', ['slug']),
-  memberships: defineTable({ userId: v.id('users'), organizationId: v.id('organizations'), role: v.union(v.literal('owner'), v.literal('admin'), v.literal('operator'), v.literal('viewer')) }).index('by_org_user', ['organizationId', 'userId']),
-  agents: defineTable({
-    organizationId: v.id('organizations'),
-    name: v.string(),
-    status: v.union(v.literal('active'), v.literal('paused')),
+  users: defineTable({
+    email: v.string(),
+    walletAddress: v.optional(v.string()),
     createdAt: v.string(),
-    chatId: v.optional(v.id('chats')),
+  })
+    .index("by_email", ["email"])
+    .index("by_wallet", ["walletAddress"]),
+  organizations: defineTable({
+    name: v.string(),
+    slug: v.string(),
+    createdAt: v.string(),
+  }).index("by_slug", ["slug"]),
+  memberships: defineTable({
+    userId: v.id("users"),
+    organizationId: v.id("organizations"),
+    role: v.union(
+      v.literal("owner"),
+      v.literal("admin"),
+      v.literal("operator"),
+      v.literal("viewer"),
+    ),
+  }).index("by_org_user", ["organizationId", "userId"]),
+
+  agents: defineTable({
+    organizationId: v.id("organizations"),
+    name: v.string(),
+    status: v.union(v.literal("active"), v.literal("paused")),
+    createdAt: v.string(),
+    chatId: v.optional(v.id("chats")),
     area: v.optional(areaValidator),
     subArea: subAreaValidator,
-  }).index('by_org', ['organizationId']).index('by_chat', ['chatId']).index('by_org_area', ['organizationId', 'area']),
+  })
+    .index("by_org", ["organizationId"])
+    .index("by_chat", ["chatId"])
+    .index("by_org_area", ["organizationId", "area"]),
   orchestrationSessions: defineTable({
-    organizationId: v.id('organizations'),
-    chatId: v.id('chats'),
-    /** Human-facing company label for Agent Office switcher. */
+    organizationId: v.id("organizations"),
+    chatId: v.id("chats"),
     companyName: v.optional(v.string()),
     status: v.union(
-      v.literal('queued'),
-      v.literal('spawning'),
-      v.literal('active'),
-      v.literal('failed'),
-      v.literal('completed')
+      v.literal("queued"),
+      v.literal("spawning"),
+      v.literal("active"),
+      v.literal("failed"),
+      v.literal("completed"),
     ),
     spawnRequestId: v.optional(v.string()),
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
+    endpointUrl: v.optional(v.string()),
+    /** RAG opportunity uuid consumed by Launch; used to dedup repeated deploy intents. */
+    opportunityId: v.optional(v.string()),
     error: v.optional(v.string()),
     createdAt: v.string(),
     updatedAt: v.string(),
   })
-    .index('by_chat', ['chatId'])
-    .index('by_org_updatedAt', ['organizationId', 'updatedAt']),
+    .index("by_chat", ["chatId"])
+    .index("by_org_updatedAt", ["organizationId", "updatedAt"])
+    .index("by_opportunityId", ["opportunityId"]),
   orchestrationAgents: defineTable({
-    sessionId: v.id('orchestrationSessions'),
+    sessionId: v.id("orchestrationSessions"),
     agentKey: v.string(),
     parentAgentKey: v.optional(v.string()),
     name: v.string(),
     role: v.optional(v.string()),
     status: v.union(
-      v.literal('spawning'),
-      v.literal('idle'),
-      v.literal('working'),
-      v.literal('blocked'),
-      v.literal('completed'),
-      v.literal('error')
+      v.literal("spawning"),
+      v.literal("idle"),
+      v.literal("working"),
+      v.literal("blocked"),
+      v.literal("completed"),
+      v.literal("error"),
     ),
     x: v.optional(v.number()),
     y: v.optional(v.number()),
@@ -58,17 +82,17 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
   })
-    .index('by_session', ['sessionId'])
-    .index('by_session_agentKey', ['sessionId', 'agentKey']),
+    .index("by_session", ["sessionId"])
+    .index("by_session_agentKey", ["sessionId", "agentKey"]),
   orchestrationEvents: defineTable({
-    sessionId: v.id('orchestrationSessions'),
+    sessionId: v.id("orchestrationSessions"),
     type: v.string(),
     payload: v.optional(v.any()),
     createdAt: v.string(),
-  }).index('by_session', ['sessionId']),
+  }).index("by_session", ["sessionId"]),
   founderIdeas: defineTable({
-    organizationId: v.id('organizations'),
-    founderUserId: v.optional(v.id('users')),
+    organizationId: v.id("organizations"),
+    founderUserId: v.optional(v.id("users")),
     /** Denormalized wallet for luck-flow lookups (also on users.walletAddress). */
     founderWallet: v.optional(v.string()),
     title: v.string(),
@@ -84,20 +108,67 @@ export default defineSchema({
     language: v.optional(v.string()),
     channelPreferences: v.optional(v.array(v.string())),
     riskTolerance: v.optional(v.string()),
+    /** Legacy fields present in historical founderIdeas docs (kept optional so existing data passes validation). */
+    intakeSource: v.optional(v.string()),
+    luckOpportunityId: v.optional(v.string()),
+    luckScore: v.optional(v.number()),
     status: v.union(
-      v.literal('draft'),
-      v.literal('briefing'),
-      v.literal('optioning'),
-      v.literal('routed'),
-      v.literal('blueprinted'),
-      v.literal('ignition_ready'),
-      v.literal('launched')
+      v.literal("draft"),
+      v.literal("briefing"),
+      v.literal("optioning"),
+      v.literal("routed"),
+      v.literal("blueprinted"),
+      v.literal("ignition_ready"),
+      v.literal("launched"),
     ),
     createdAt: v.string(),
     updatedAt: v.string(),
-  }).index('by_org_updatedAt', ['organizationId', 'updatedAt']),
+  }).index("by_org_updatedAt", ["organizationId", "updatedAt"]),
+  /**
+   * One company = one deploy = one checkout. A deploymentIntent is the persisted
+   * server-side record of "this paid Stripe checkout is authorized to spawn this
+   * company". It prevents double charges after post-payment failures (see
+   * docs/CONTRATOS_INTEGRACION_FLUJOS.md "Pipeline de pago unificado").
+   */
+  deploymentIntents: defineTable({
+    organizationId: v.id("organizations"),
+    founderUserId: v.optional(v.id("users")),
+    /** Denormalized wallet (also on users.walletAddress). */
+    founderWallet: v.optional(v.string()),
+    source: v.union(
+      v.literal("form_intake"),
+      v.literal("chat_intake"),
+      v.literal("rag_opportunity"),
+    ),
+    founderIdeaId: v.optional(v.id("founderIdeas")),
+    chatId: v.optional(v.id("chats")),
+    /** RAG opportunity uuid this intent is (or was) linked to. */
+    opportunityId: v.optional(v.string()),
+    companyName: v.string(),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("checkout_pending"),
+      v.literal("paid"),
+      v.literal("spawning"),
+      v.literal("deployed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    planId: v.optional(v.string()),
+    stripeCheckoutSessionId: v.optional(v.string()),
+    stripePaymentIntentId: v.optional(v.string()),
+    orchestrationSessionId: v.optional(v.id("orchestrationSessions")),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    paidAt: v.optional(v.string()),
+    consumedAt: v.optional(v.string()),
+  })
+    .index("by_org_updatedAt", ["organizationId", "updatedAt"])
+    .index("by_stripe_session", ["stripeCheckoutSessionId"])
+    .index("by_opportunityId", ["opportunityId"])
+    .index("by_wallet", ["founderWallet"]),
   founderBriefs: defineTable({
-    ideaId: v.id('founderIdeas'),
+    ideaId: v.id("founderIdeas"),
     businessSummary: v.string(),
     clarifiedProblem: v.string(),
     targetCustomer: v.string(),
@@ -110,10 +181,14 @@ export default defineSchema({
     promptVersion: v.optional(v.string()),
     createdAt: v.string(),
     updatedAt: v.string(),
-  }).index('by_idea', ['ideaId']),
+  }).index("by_idea", ["ideaId"]),
   companyOptions: defineTable({
-    ideaId: v.id('founderIdeas'),
-    profile: v.union(v.literal('conservative'), v.literal('balanced'), v.literal('ambitious')),
+    ideaId: v.id("founderIdeas"),
+    profile: v.union(
+      v.literal("conservative"),
+      v.literal("balanced"),
+      v.literal("ambitious"),
+    ),
     optionKey: v.string(),
     name: v.string(),
     businessThesis: v.string(),
@@ -128,18 +203,22 @@ export default defineSchema({
     rawOutput: v.optional(v.string()),
     promptVersion: v.optional(v.string()),
     createdAt: v.string(),
-  }).index('by_idea', ['ideaId']),
+  }).index("by_idea", ["ideaId"]),
   selectedRoutes: defineTable({
-    ideaId: v.id('founderIdeas'),
+    ideaId: v.id("founderIdeas"),
     selectedOptionKey: v.string(),
-    selectedProfile: v.union(v.literal('conservative'), v.literal('balanced'), v.literal('ambitious')),
+    selectedProfile: v.union(
+      v.literal("conservative"),
+      v.literal("balanced"),
+      v.literal("ambitious"),
+    ),
     rationale: v.optional(v.string()),
-    selectedByUserId: v.optional(v.id('users')),
+    selectedByUserId: v.optional(v.id("users")),
     createdAt: v.string(),
-  }).index('by_idea', ['ideaId']),
+  }).index("by_idea", ["ideaId"]),
   companyBlueprints: defineTable({
-    ideaId: v.id('founderIdeas'),
-    routeId: v.id('selectedRoutes'),
+    ideaId: v.id("founderIdeas"),
+    routeId: v.id("selectedRoutes"),
     version: v.number(),
     selectedCompanyStructure: v.array(v.string()),
     coreAgents: v.array(v.string()),
@@ -153,30 +232,32 @@ export default defineSchema({
     rawOutput: v.optional(v.string()),
     promptVersion: v.optional(v.string()),
     createdAt: v.string(),
-  }).index('by_idea', ['ideaId']),
+  }).index("by_idea", ["ideaId"]),
   ignitionConfigs: defineTable({
-    blueprintId: v.id('companyBlueprints'),
+    blueprintId: v.id("companyBlueprints"),
     prompt: v.string(),
     config: v.any(),
-    model: v.optional(v.union(v.literal('codex'), v.literal('opus'), v.literal('venice'))),
+    model: v.optional(
+      v.union(v.literal("codex"), v.literal("opus"), v.literal("venice")),
+    ),
     createdAt: v.string(),
     updatedAt: v.string(),
-  }).index('by_blueprint', ['blueprintId']),
+  }).index("by_blueprint", ["blueprintId"]),
   deploymentJobs: defineTable({
-    organizationId: v.id('organizations'),
-    ideaId: v.id('founderIdeas'),
-    blueprintId: v.id('companyBlueprints'),
-    orchestrationSessionId: v.optional(v.id('orchestrationSessions')),
+    organizationId: v.id("organizations"),
+    ideaId: v.id("founderIdeas"),
+    blueprintId: v.id("companyBlueprints"),
+    orchestrationSessionId: v.optional(v.id("orchestrationSessions")),
     status: v.union(
-      v.literal('draft'),
-      v.literal('ready_to_deploy'),
-      v.literal('deploying'),
-      v.literal('deployed'),
-      v.literal('failed'),
-      v.literal('queued'),
-      v.literal('running'),
-      v.literal('succeeded'),
-      v.literal('cancelled')
+      v.literal("draft"),
+      v.literal("ready_to_deploy"),
+      v.literal("deploying"),
+      v.literal("deployed"),
+      v.literal("failed"),
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("succeeded"),
+      v.literal("cancelled"),
     ),
     provider: v.optional(v.string()),
     target: v.optional(v.string()),
@@ -186,74 +267,148 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
   })
-    .index('by_org_updatedAt', ['organizationId', 'updatedAt'])
-    .index('by_idea', ['ideaId'])
-    .index('by_session', ['orchestrationSessionId']),
+    .index("by_org_updatedAt", ["organizationId", "updatedAt"])
+    .index("by_idea", ["ideaId"])
+    .index("by_session", ["orchestrationSessionId"]),
   runtimeInstances: defineTable({
-    jobId: v.id('deploymentJobs'),
-    environment: v.union(v.literal('staging'), v.literal('production')),
-    status: v.union(v.literal('starting'), v.literal('healthy'), v.literal('degraded'), v.literal('stopped'), v.literal('failed')),
+    jobId: v.id("deploymentJobs"),
+    environment: v.union(v.literal("staging"), v.literal("production")),
+    status: v.union(
+      v.literal("starting"),
+      v.literal("healthy"),
+      v.literal("degraded"),
+      v.literal("stopped"),
+      v.literal("failed"),
+    ),
     endpointUrl: v.optional(v.string()),
     vpsRef: v.optional(v.string()),
     containerRef: v.optional(v.string()),
     lastHeartbeatAt: v.optional(v.string()),
     createdAt: v.string(),
     updatedAt: v.string(),
-  }).index('by_job', ['jobId']),
+  }).index("by_job", ["jobId"]),
   agentEvents: defineTable({
-    organizationId: v.id('organizations'),
-    sessionId: v.optional(v.id('orchestrationSessions')),
-    deploymentJobId: v.optional(v.id('deploymentJobs')),
-    runtimeInstanceId: v.optional(v.id('runtimeInstances')),
+    organizationId: v.id("organizations"),
+    sessionId: v.optional(v.id("orchestrationSessions")),
+    deploymentJobId: v.optional(v.id("deploymentJobs")),
+    runtimeInstanceId: v.optional(v.id("runtimeInstances")),
     agentKey: v.optional(v.string()),
-    level: v.union(v.literal('info'), v.literal('warn'), v.literal('error')),
+    level: v.union(v.literal("info"), v.literal("warn"), v.literal("error")),
     type: v.string(),
     message: v.string(),
     payload: v.optional(v.any()),
     createdAt: v.string(),
   })
-    .index('by_org_time', ['organizationId', 'createdAt'])
-    .index('by_session', ['sessionId']),
-  agentRuns: defineTable({ organizationId: v.id('organizations'), agentId: v.id('agents'), taskId: v.optional(v.id('tasks')), status: v.union(v.literal('queued'), v.literal('running'), v.literal('success'), v.literal('failed')), createdAt: v.string() }).index('by_agent', ['agentId']),
-  tasks: defineTable({ organizationId: v.id('organizations'), title: v.string(), status: v.union(v.literal('todo'), v.literal('in_progress'), v.literal('done')), priority: v.union(v.literal('low'), v.literal('medium'), v.literal('high')), assigneeAgentId: v.optional(v.id('agents')), createdAt: v.string() }).index('by_org_status', ['organizationId', 'status']),
-  taskEvents: defineTable({ taskId: v.id('tasks'), type: v.string(), payload: v.optional(v.any()), createdAt: v.string() }).index('by_task', ['taskId']),
+    .index("by_org_time", ["organizationId", "createdAt"])
+    .index("by_session", ["sessionId"]),
+  agentRuns: defineTable({
+    organizationId: v.id("organizations"),
+    agentId: v.id("agents"),
+    taskId: v.optional(v.id("tasks")),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("success"),
+      v.literal("failed"),
+    ),
+    createdAt: v.string(),
+  }).index("by_agent", ["agentId"]),
+  tasks: defineTable({
+    organizationId: v.id("organizations"),
+    title: v.string(),
+    status: v.union(
+      v.literal("todo"),
+      v.literal("in_progress"),
+      v.literal("done"),
+    ),
+    priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+    assigneeAgentId: v.optional(v.id("agents")),
+    createdAt: v.string(),
+  }).index("by_org_status", ["organizationId", "status"]),
+  taskEvents: defineTable({
+    taskId: v.id("tasks"),
+    type: v.string(),
+    payload: v.optional(v.any()),
+    createdAt: v.string(),
+  }).index("by_task", ["taskId"]),
   chats: defineTable({
-    organizationId: v.optional(v.id('organizations')),
+    organizationId: v.optional(v.id("organizations")),
     title: v.string(),
     createdAt: v.string(),
     updatedAt: v.string(),
-    agentId: v.optional(v.id('agents')),
+    agentId: v.optional(v.id("agents")),
     summary: v.optional(v.string()),
     summaryUpdatedAt: v.optional(v.string()),
-  }).index('by_org', ['organizationId']).index('by_updatedAt', ['updatedAt']).index('by_agent', ['agentId']),
-  messages: defineTable({ chatId: v.id('chats'), authorType: v.union(v.literal('human'), v.literal('agent')), authorId: v.string(), content: v.string(), createdAt: v.string() }).index('by_chat', ['chatId']),
+  })
+    .index("by_org", ["organizationId"])
+    .index("by_updatedAt", ["updatedAt"])
+    .index("by_agent", ["agentId"]),
+  messages: defineTable({
+    chatId: v.id("chats"),
+    authorType: v.union(v.literal("human"), v.literal("agent")),
+    authorId: v.string(),
+    content: v.string(),
+    createdAt: v.string(),
+  }).index("by_chat", ["chatId"]),
   /** Latest Avril chat → ignition export for this thread (full demo path). */
   chatIgnitionDrafts: defineTable({
-    organizationId: v.id('organizations'),
-    chatId: v.id('chats'),
+    organizationId: v.id("organizations"),
+    chatId: v.id("chats"),
     phase: v.optional(v.string()),
-    status: v.union(v.literal('collecting'), v.literal('ready'), v.literal('spawned')),
+    status: v.union(
+      v.literal("collecting"),
+      v.literal("ready"),
+      v.literal("spawned"),
+    ),
     captured: v.optional(v.any()),
     ignitionPrompt: v.optional(v.string()),
     handoffPayload: v.optional(v.any()),
     lastArchitectPayload: v.optional(v.any()),
-    spawnSessionId: v.optional(v.id('orchestrationSessions')),
+    spawnSessionId: v.optional(v.id("orchestrationSessions")),
     createdAt: v.string(),
     updatedAt: v.string(),
-  }).index('by_chat', ['chatId']),
-  wallets: defineTable({ organizationId: v.id('organizations'), ownerUserId: v.id('users'), provider: v.string(), address: v.string(), createdAt: v.string() }).index('by_org', ['organizationId']),
-  walletPermissions: defineTable({ walletId: v.id('wallets'), memberUserId: v.id('users'), permission: v.union(v.literal('view'), v.literal('propose'), v.literal('execute'), v.literal('approve')), createdAt: v.string() }).index('by_wallet_user', ['walletId', 'memberUserId']),
+  }).index("by_chat", ["chatId"]),
+  wallets: defineTable({
+    organizationId: v.id("organizations"),
+    ownerUserId: v.id("users"),
+    provider: v.string(),
+    address: v.string(),
+    createdAt: v.string(),
+  }).index("by_org", ["organizationId"]),
+  walletPermissions: defineTable({
+    walletId: v.id("wallets"),
+    memberUserId: v.id("users"),
+    permission: v.union(
+      v.literal("view"),
+      v.literal("propose"),
+      v.literal("execute"),
+      v.literal("approve"),
+    ),
+    createdAt: v.string(),
+  }).index("by_wallet_user", ["walletId", "memberUserId"]),
   approvals: defineTable({
-    organizationId: v.id('organizations'),
+    organizationId: v.id("organizations"),
     resourceType: v.string(),
     resourceId: v.string(),
-    requestedBy: v.id('users'),
-    status: v.union(v.literal('pending'), v.literal('approved'), v.literal('rejected')),
-    ideaId: v.optional(v.id('founderIdeas')),
-    jobId: v.optional(v.id('deploymentJobs')),
+    requestedBy: v.id("users"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected"),
+    ),
+    ideaId: v.optional(v.id("founderIdeas")),
+    jobId: v.optional(v.id("deploymentJobs")),
     reason: v.optional(v.string()),
     decisionAt: v.optional(v.string()),
     createdAt: v.string(),
-  }).index('by_org_status', ['organizationId', 'status']),
-  auditLogs: defineTable({ organizationId: v.id('organizations'), actorUserId: v.optional(v.id('users')), action: v.string(), resourceType: v.string(), resourceId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.string() }).index('by_org_time', ['organizationId', 'createdAt'])
+  }).index("by_org_status", ["organizationId", "status"]),
+  auditLogs: defineTable({
+    organizationId: v.id("organizations"),
+    actorUserId: v.optional(v.id("users")),
+    action: v.string(),
+    resourceType: v.string(),
+    resourceId: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    createdAt: v.string(),
+  }).index("by_org_time", ["organizationId", "createdAt"]),
 });

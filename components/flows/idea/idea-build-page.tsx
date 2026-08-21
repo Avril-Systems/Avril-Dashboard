@@ -1,8 +1,8 @@
 'use client';
-
+import { LiquidMetalShape } from '@/components/ui/liquid-metal-shape';
+import { avrilColors } from '@/lib/avril-tokens';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Network, Sparkles, Fingerprint, Lightbulb, MessageSquare } from 'lucide-react';
 import { FlowShell } from '@/components/flows/shared/flow-shell';
@@ -21,7 +21,6 @@ import { buildOpportunityFromWizard } from '@/components/flows/luck/mock-data';
 import type { Opportunity } from '@/components/flows/luck/types';
 import { useWaaP } from '@/src/components/WaaPProvider';
 import { signInWithWallet } from '@/src/lib/establishWalletSession';
-import { useSpawnFromOpportunity } from '@/src/hooks/useSpawnFromOpportunity';
 import {
   clearFlowDraft,
   clearIdeaIntakeDrafts,
@@ -29,6 +28,7 @@ import {
   readFlowDraft,
   writeFlowDraft,
 } from '@/src/lib/ideaIntakeDraft';
+import { IdeaGenerationErrorState } from './idea-generation-error-state';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
 
@@ -54,7 +54,6 @@ type EntryMode = 'form' | 'chat';
 type FormStep = 'wizard' | 'loading' | 'blueprint' | 'deploy' | 'creating' | 'dashboard';
 
 function IdeaBuildPageContent() {
-  const router = useRouter();
   const { t, language } = useLanguage();
   const i = t.flow.idea;
   const { isReady, isAuthenticated, login, refreshWalletSession } = useWaaP();
@@ -64,6 +63,7 @@ function IdeaBuildPageContent() {
   const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
   const [loadingIndex, setLoadingIndex] = useState(0);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [lastAnswers, setLastAnswers] = useState<WizardAnswers | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
   const [flowReady, setFlowReady] = useState(false);
@@ -80,14 +80,6 @@ function IdeaBuildPageContent() {
     setCreatingIdeaId(ideaId);
     setFormStep('creating');
   }, []);
-
-  const { spawnedSessionId, spawnError } = useSpawnFromOpportunity({
-    active: formStep === 'creating',
-    opportunity,
-    ideaId: creatingIdeaId,
-    authHeaders,
-    intakeSource: 'form_intake',
-  });
 
   useEffect(() => {
     const draft = readFlowDraft();
@@ -151,11 +143,12 @@ function IdeaBuildPageContent() {
     resetFormFlow();
   }, [resetFormFlow]);
 
-  const handleWizardGenerate = useCallback(
+const handleWizardGenerate = useCallback(
     async (answers: WizardAnswers) => {
       setGenerateError(null);
       setLoadingIndex(0);
       setFormStep('loading');
+      setLastAnswers(answers);
 
       const context = [
         `Company: ${answers.companyName}`,
@@ -175,6 +168,17 @@ function IdeaBuildPageContent() {
       ].join('\n');
 
       let summaryOverride: string | undefined;
+
+      // 🚧 TEMP BYPASS — salta Venice para probar el flujo de pago sin la API key.
+      // BORRAR (o comentar) este bloque para volver a probar la pantalla de error real.
+      if (process.env.NODE_ENV !== 'production') {
+        const next = buildOpportunityFromWizard(language, answers, {});
+        setOpportunity(next);
+        setFormStep('blueprint');
+        return;
+      }
+      // 🚧 FIN TEMP BYPASS
+
       try {
         const res = await fetch('/api/chat/folder-profile-prompt', {
           method: 'POST',
@@ -186,18 +190,27 @@ function IdeaBuildPageContent() {
           }),
         });
         const data = (await res.json().catch(() => ({}))) as { prompt?: string; error?: { message?: string } };
-        if (res.ok && typeof data.prompt === 'string' && data.prompt.trim()) {
-          // Use Venice vision paragraph as blueprint summary when available.
-          const firstParagraph =
-            data.prompt
-              .replace(/^#.*$/m, '')
-              .split(/\n\n+/)
-              .map((p) => p.trim())
-              .find((p) => p.length > 40) || data.prompt.trim();
-          summaryOverride = firstParagraph.slice(0, 420);
+
+        if (!res.ok || typeof data.prompt !== 'string' || !data.prompt.trim()) {
+          setGenerateError(
+            data.error?.message ||
+              "Avril couldn't turn your idea into a clear blueprint. Add more detail, or edit what you already wrote."
+          );
+          setFormStep('wizard');
+          return;
         }
+
+        const firstParagraph =
+          data.prompt
+            .replace(/^#.*$/m, '')
+            .split(/\n\n+/)
+            .map((p) => p.trim())
+            .find((p) => p.length > 40) || data.prompt.trim();
+        summaryOverride = firstParagraph.slice(0, 420);
       } catch {
-        // Blueprint still builds from wizard answers if Venice fails.
+        setGenerateError("Avril couldn't reach Venice to generate your blueprint. Check your connection and try again.");
+        setFormStep('wizard');
+        return;
       }
 
       const next = buildOpportunityFromWizard(language, answers, { summaryOverride });
@@ -215,13 +228,6 @@ function IdeaBuildPageContent() {
     }, 700);
     return () => window.clearInterval(id);
   }, [formStep, i.loading]);
-
-  // Jump into the new office as soon as spawn returns.
-  useEffect(() => {
-    if (formStep !== 'creating' || !spawnedSessionId) return;
-    clearIdeaIntakeDrafts();
-    router.push(`/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`);
-  }, [formStep, spawnedSessionId, router]);
 
   if (!flowReady) {
     return (
@@ -356,10 +362,47 @@ function IdeaBuildPageContent() {
     );
   }
 
-  // Form path — same review/deploy UX as Generate opportunities
+// Form path — same review/deploy UX as Generate opportunities
   return (
     <FlowShell>
-      <div className="flex w-full max-w-4xl flex-col gap-5">
+      <div className="relative flex w-full flex-col items-center">
+{formStep === 'wizard' && (
+          <LiquidMetalShape
+            variant="rings"
+            className="pointer-events-none fixed -top-32 -right-32 z-0 hidden h-[420px] w-[420px] opacity-55 lg:block xl:h-[500px] xl:w-[500px]"
+            colorTint={avrilColors.brand}
+            speed={0.4}
+            scale={0.85}
+          />
+        )}
+        {formStep === 'blueprint' && (
+          <LiquidMetalShape
+            variant="orbs"
+            className="pointer-events-none fixed -bottom-16 -left-20 z-0 hidden h-[420px] w-[240px] opacity-60 lg:block xl:h-[480px] xl:w-[280px]"
+            colorTint={avrilColors.brand}
+            speed={0.5}
+            scale={0.78}
+          />
+        )}
+        {formStep === 'blueprint' && (
+          <LiquidMetalShape
+            variant="orbs"
+            className="pointer-events-none fixed -bottom-16 -left-20 z-0 hidden h-[420px] w-[240px] opacity-60 lg:block xl:h-[480px] xl:w-[280px]"
+            colorTint={avrilColors.brand}
+            speed={0.5}
+            scale={0.78}
+          />
+        )}
+        {formStep === 'dashboard' && (
+          <LiquidMetalShape
+            variant="orbs"
+            className="pointer-events-none fixed -bottom-16 -right-20 z-0 hidden h-[420px] w-[240px] opacity-60 lg:block xl:h-[480px] xl:w-[280px]"
+            colorTint={avrilColors.brand}
+            speed={0.5}
+            scale={0.78}
+          />
+        )}
+        <div className="flex w-full max-w-4xl flex-col gap-5">
         {formStep === 'wizard' || formStep === 'loading' ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <button
@@ -392,7 +435,7 @@ function IdeaBuildPageContent() {
           </GlassPanel>
         ) : (
           <AnimatePresence mode="wait">
-            {formStep === 'wizard' && (
+{formStep === 'wizard' && (
               <motion.div
                 key="wizard"
                 initial={{ opacity: 0, y: 12 }}
@@ -400,11 +443,19 @@ function IdeaBuildPageContent() {
                 exit={{ opacity: 0, y: -8 }}
                 className="w-full"
               >
-                {generateError ? <p className="mb-3 text-center text-xs text-rose-300">{generateError}</p> : null}
-                <FounderWizard onGenerate={(answers) => void handleWizardGenerate(answers)} />
+                {generateError ? (
+                  <IdeaGenerationErrorState
+                    description={generateError}
+                    onEditIdea={() => setGenerateError(null)}
+                    onTryAgain={() => {
+                      if (lastAnswers) void handleWizardGenerate(lastAnswers);
+                    }}
+                  />
+                ) : (
+                  <FounderWizard onGenerate={(answers) => void handleWizardGenerate(answers)} />
+                )}
               </motion.div>
             )}
-
             {formStep === 'loading' && (
               <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <LoadingState message={i.loading[loadingIndex] ?? i.loading[0]} />
@@ -440,42 +491,11 @@ function IdeaBuildPageContent() {
 
             {formStep === 'creating' && opportunity && (
               <motion.div key="creating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
-                {spawnError ? (
-                  <GlassPanel className="mx-auto max-w-md space-y-4 p-6 text-center">
-                    <h2 className="text-xl text-foreground">Almost there</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Your company <span className="text-brand">{opportunity.name}</span> was saved, but OpenClaw
-                      spawn failed.
-                    </p>
-                    <p className="text-xs text-rose-300">{spawnError}</p>
-                    <MarketingBrandButton
-                      label="Open Agent Office anyway"
-                      href={
-                        spawnedSessionId
-                          ? `/agents/office?sessionId=${encodeURIComponent(spawnedSessionId)}`
-                          : '/agents/office'
-                      }
-                      className="mx-auto"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setFormStep('dashboard')}
-                      className="text-sm text-brand hover:underline"
-                    >
-                      Continue to summary
-                    </button>
-                  </GlassPanel>
-                ) : (
-                  <CompanyCreating
-                    companyName={opportunity.name}
-                    durationMs={12_000}
-                    onComplete={() => {
-                      // Spawn redirect handles success; if still pending, keep waiting via animation loop.
-                      if (!spawnedSessionId && !spawnError) return;
-                      if (!spawnedSessionId) setFormStep('dashboard');
-                    }}
-                  />
-                )}
+                <CompanyCreating
+                  companyName={opportunity.name}
+                  durationMs={12_000}
+                  onComplete={() => setFormStep('dashboard')}
+                />
               </motion.div>
             )}
 
@@ -484,7 +504,6 @@ function IdeaBuildPageContent() {
                 <FlowDashboard
                   companyName={opportunity.name}
                   ideaId={linkedIdeaId ?? undefined}
-                  sessionId={spawnedSessionId ?? undefined}
                   onRestart={() => {
                     clearAllDrafts();
                     setCreatingIdeaId(null);
@@ -493,8 +512,9 @@ function IdeaBuildPageContent() {
                 />
               </motion.div>
             )}
-          </AnimatePresence>
+</AnimatePresence>
         )}
+        </div>
       </div>
     </FlowShell>
   );
