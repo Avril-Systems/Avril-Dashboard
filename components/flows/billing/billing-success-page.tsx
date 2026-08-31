@@ -9,6 +9,7 @@ import { FlowDashboard } from '@/components/flows/shared/flow-dashboard';
 import { CompanyCreating } from '@/components/flows/shared/company-creating';
 import { useLanguage } from '@/components/marketing/language-context';
 import { fetchWalletSession } from '@/src/lib/establishWalletSession';
+import { markIdeaPaid } from '@/src/lib/paidIdeas';
 
 export function BillingSuccessPage() {
   const searchParams = useSearchParams();
@@ -44,6 +45,7 @@ export function BillingSuccessPage() {
 
         setCompanyName(data.companyName || '');
         setIdeaId(walletSession?.luckIdeaId);
+        markIdeaPaid(walletSession?.luckIdeaId);
         setState('creating');
       } catch {
         setState('failed');

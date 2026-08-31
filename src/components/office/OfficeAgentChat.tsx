@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 import { cn } from '@/lib/utils';
-
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
+import remarkBreaks from 'remark-breaks';
 type AgentOption = {
   agentKey: string;
   name: string;
@@ -202,7 +205,11 @@ export default function OfficeAgentChat({
               {msg.role === 'agent' && (
                 <p className="mb-1 text-[10px] font-medium text-muted-foreground">{msg.agentName}</p>
               )}
-              <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+              <div className="chat-markdown break-words">
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[rehypeSanitize]}>
+                  {msg.content}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
         ))}

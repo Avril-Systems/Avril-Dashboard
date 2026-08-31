@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const intake = opportunityToIntake(opportunity);
+   const intake = opportunityToIntake(opportunity);
     let founderUserId: string | undefined;
     try {
       founderUserId = await ensureWalletUser(session.address);

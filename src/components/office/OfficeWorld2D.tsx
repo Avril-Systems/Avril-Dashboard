@@ -3,7 +3,44 @@
 import { useMemo } from 'react';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 import { cn } from '@/lib/utils';
-
+import { motion } from 'framer-motion';
+import {
+  TrendingUp,
+  Headphones,
+  DollarSign,
+  Search,
+  ShieldCheck,
+  PenTool,
+  Handshake,
+  BarChart3,
+  Settings,
+  Bot,
+} from 'lucide-react';
+// 🎨 Mapea agentKey → imagen del personaje. Agrega más conforme tengas los archivos.
+const AGENT_AVATAR_IMAGES: Record<string, string> = {
+  ava: '/agents/ava-alien.png',
+};
+const DEFAULT_AGENT_IMAGE = '/agents/ava-alien.png'; // fallback: usa la mascota para cualquier agente sin imagen propia
+const ROOM_RADIUS_CLASSES = ['rounded-xl', 'rounded-2xl', 'rounded-3xl'];
+const GLOW_PALETTE = [
+  '0,153,175',   // teal (marca)
+  '168,85,247',  // violeta
+  '245,158,11',  // ámbar
+  '244,63,94',   // rosa
+  '16,185,129',  // esmeralda
+  '59,130,246',  // azul
+  '217,70,239',  // fucsia
+  '249,115,22',  // naranja
+  '34,211,238',  // cian
+];
+function hashString(key: string): number {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return hash;
+}
+function glowColorForKey(key: string): string {
+  return GLOW_PALETTE[hashString(key) % GLOW_PALETTE.length];
+}
 type AgentStatus = 'spawning' | 'idle' | 'working' | 'blocked' | 'completed' | 'error';
 
 type AgentNode = {
@@ -97,7 +134,7 @@ const MOCK_AGENTS: WorldAgent[] = [
 ];
 
 const WORLD_WIDTH = 680;
-const WORLD_HEIGHT = 360;
+const WORLD_HEIGHT = 620;
 
 const STATUS_DOT_CLASS: Record<AgentStatus, string> = {
   idle: 'bg-emerald-400',
@@ -107,7 +144,21 @@ const STATUS_DOT_CLASS: Record<AgentStatus, string> = {
   completed: 'bg-teal-400',
   blocked: 'bg-amber-500',
 };
+const ROLE_ICON_MAP: Record<string, typeof Bot> = {
+  Operations: Settings,
+  Growth: TrendingUp,
+  Support: Headphones,
+  Finance: DollarSign,
+  'Market research & data gathering': Search,
+  'Quality checks & compliance': ShieldCheck,
+  'Content creation & comms': PenTool,
+  'Distribution & partnerships': Handshake,
+  'Metrics, KPI tracking & reporting': BarChart3,
+};
 
+function iconForRole(role: string) {
+  return ROLE_ICON_MAP[role] ?? Bot;
+}
 const ROLE_AVATAR_CLASS: Record<string, string> = {
   'Ethics Analyzer': 'from-violet-500 to-fuchsia-500',
   'Clinical Context': 'from-cyan-500 to-blue-500',
@@ -126,13 +177,26 @@ const ROLE_AVATAR_CLASS: Record<string, string> = {
 };
 
 function withLayout(agents: AgentNode[]): WorldAgent[] {
-  const centerX = 420;
-  const centerY = 260;
+  // Grid en vez de anillos: se reparte solo sin importar cuántos agentes haya.
+  const cols = Math.max(1, Math.ceil(Math.sqrt(agents.length)));
+  const rows = Math.max(1, Math.ceil(agents.length / cols));
+  const marginX = 70;
+  const marginY = 95;
+  const cellW = (WORLD_WIDTH - marginX * 2) / cols;
+  const cellH = (WORLD_HEIGHT - marginY * 2) / rows;
 
   return agents.map((agent, i) => {
     const hasCoords = typeof agent.x === 'number' && typeof agent.y === 'number';
-    const angle = (Math.PI * 2 * i) / Math.max(agents.length, 1);
-    const radius = 180 + (i % 3) * 42;
+const col = i % cols;
+    const row = Math.floor(i / cols);
+    // Jitter consistente (basado en el nombre del agente, no random puro) para
+    // que se vea acomodado a mano en vez de en cuadrícula perfecta.
+    const seed = hashString(agent.agentKey);
+    const jitterX = ((seed % 100) / 100 - 0.5) * cellW * 0.5;
+    const jitterY = (((seed >>> 8) % 100) / 100 - 0.5) * cellH * 0.5;
+    const brickOffset = row % 2 === 1 ? cellW * 0.18 : 0; // filas pares/impares desfasadas
+    const cx = marginX + col * cellW + cellW / 2 + jitterX + brickOffset;
+    const cy = marginY + row * cellH + cellH / 2 + jitterY;
 
     return {
       id: agent._id,
@@ -141,8 +205,8 @@ function withLayout(agents: AgentNode[]): WorldAgent[] {
       name: agent.name,
       role: agent.role || 'Agent',
       status: agent.status,
-      x: hasCoords ? (agent.x as number) : Math.round(centerX + Math.cos(angle) * radius),
-      y: hasCoords ? (agent.y as number) : Math.round(centerY + Math.sin(angle) * radius),
+      x: hasCoords ? (agent.x as number) : Math.round(cx),
+      y: hasCoords ? (agent.y as number) : Math.round(cy),
       ensName: `${agent.agentKey}.agent`,
       description: agent.role ? `${agent.role} active` : 'Agent active',
       isMock: false,
@@ -177,22 +241,36 @@ export default function OfficeWorld2D({
     [worldAgents]
   );
 
-  const links = useMemo(() => {
+const links = useMemo(() => {
     if (!hasRealAgents) {
       return [
         { parent: 'arkhe', child: 'lumen' },
         { parent: 'arkhe', child: 'flux' },
       ];
     }
-    return worldAgents
+
+    const hierarchyLinks = worldAgents
       .filter((a) => a.parentAgentKey)
       .map((a) => ({ parent: a.parentAgentKey as string, child: a.agentKey }));
+
+    if (hierarchyLinks.length > 0) return hierarchyLinks;
+
+    // Sin jerarquía real entre agentes: conecta los cuartos en cadena,
+    // en el orden del grid, para simular pasillos entre oficinas.
+    const chain: { parent: string; child: string }[] = [];
+    for (let i = 0; i < worldAgents.length - 1; i += 1) {
+      chain.push({ parent: worldAgents[i].agentKey, child: worldAgents[i + 1].agentKey });
+    }
+    return chain;
   }, [worldAgents, hasRealAgents]);
 
   return (
     <GlassPanel className="p-2 sm:p-3">
-      <div className="relative w-full overflow-hidden rounded-xl border border-border/60 bg-[var(--avril-canvas)]">
-        <div className="relative mx-auto h-[220px] w-full sm:h-[260px] md:h-[300px] xl:h-[360px]">
+     <div className="relative w-full overflow-hidden rounded-xl border border-border/60 bg-[var(--avril-canvas)]">
+        <p className="absolute left-3 top-2 z-10 font-heading text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+          Agent Floorplan
+        </p>
+        <div className="relative mx-auto h-[280px] w-full sm:h-[340px] md:h-[420px] xl:h-[520px]">
           <div
             className="absolute left-1/2 top-1/2 origin-center -translate-x-1/2 -translate-y-1/2 scale-[0.48] sm:scale-[0.56] md:scale-[0.68] xl:scale-[0.82]"
             style={{ width: WORLD_WIDTH, height: WORLD_HEIGHT }}
@@ -206,24 +284,71 @@ export default function OfficeWorld2D({
                 backgroundSize: '28px 28px',
               }}
             />
+{worldAgents.map((agent) => {
+              const seed = hashString(agent.agentKey);
+              const glow = glowColorForKey(agent.agentKey);
+              const roomW = 110 + (seed % 50); // 110–160px
+              const roomH = 100 + ((seed >>> 4) % 45); // 100–145px
+              const roomRot = -6 + ((seed >>> 8) % 13); // -6° a +6°
+              const RoleIcon = iconForRole(agent.role);
+
+              return (
+                <div
+                  key={`room-${agent.id}`}
+                  className="pointer-events-none absolute"
+                  style={{ left: agent.x, top: agent.y }}
+                >
+                  {/* Cuarto hexagonal */}
+                  <div
+                    className="absolute border"
+                    style={{
+                      width: roomW,
+                      height: roomH,
+                      transform: `translate(-50%, -42%) rotate(${roomRot}deg)`,
+                      clipPath: 'polygon(22% 0%, 78% 0%, 100% 50%, 78% 100%, 22% 100%, 0% 50%)',
+                      background: `rgba(${glow},0.06)`,
+                      borderColor: `rgba(${glow},0.35)`,
+                    }}
+                  />
+                  {/* Ícono de rol, sin rotar */}
+                  <div
+                    className="absolute flex items-center justify-center rounded-full border"
+                    style={{
+                      width: 22,
+                      height: 22,
+                      transform: `translate(-50%, ${-roomH * 0.62}px)`,
+                      background: `rgba(${glow},0.18)`,
+                      borderColor: `rgba(${glow},0.4)`,
+                    }}
+                  >
+                    <RoleIcon className="h-3 w-3" style={{ color: `rgb(${glow})` }} />
+                  </div>
+                </div>
+              );
+            })}
 
             <svg className="pointer-events-none absolute inset-0 h-full w-full">
               {links.map((link) => {
                 const parent = byKey.get(link.parent);
                 const child = byKey.get(link.child);
                 if (!parent || !child) return null;
+                const glow = glowColorForKey(child.agentKey);
+                const midX = (parent.x + child.x) / 2;
+                const midY = (parent.y + child.y) / 2;
 
                 return (
-                  <line
-                    key={`${link.parent}->${link.child}`}
-                    x1={parent.x + 64}
-                    y1={parent.y + 44}
-                    x2={child.x + 64}
-                    y2={child.y + 44}
-                    stroke="rgba(0, 153, 175, 0.45)"
-                    strokeWidth="1.5"
-                    strokeDasharray={hasRealAgents ? undefined : '5 4'}
-                  />
+                  <g key={`${link.parent}->${link.child}`}>
+                    <line
+                      x1={parent.x}
+                      y1={parent.y}
+                      x2={child.x}
+                      y2={child.y}
+                      stroke={`rgba(${glow}, 0.4)`}
+                      strokeWidth="1.5"
+                      strokeDasharray="4 5"
+                    />
+                    <circle cx={midX} cy={midY} r={3} fill={`rgba(${glow}, 0.9)`} />
+                  </g>
                 );
               })}
             </svg>
@@ -235,44 +360,83 @@ export default function OfficeWorld2D({
               const statusClass = STATUS_DOT_CLASS[agent.status];
               const isWorking = agent.status === 'working';
 
+              const isOrchestrator = !agent.parentAgentKey;
+
               return (
                 <button
                   key={agent.id}
                   type="button"
                   onClick={() => onSelectAgent(agent.agentKey)}
+                  title={`${agent.name} — ${agent.role}`}
                   className={cn(
-                    'absolute min-w-[128px] max-w-[150px] rounded-xl border border-border/70 bg-surface/70 p-2.5 text-left backdrop-blur-xl transition-all',
-                    'shadow-[inset_0_1px_0_oklch(1_0_0/0.06),0_8px_24px_oklch(0_0_0/0.25)]',
-                    selected ? 'ring-2 ring-brand' : 'hover:border-brand/40 hover:ring-1 hover:ring-brand/25'
+                    'absolute flex flex-col items-center gap-1.5 transition-transform',
+                    selected ? 'z-10 scale-105' : 'hover:scale-105'
                   )}
                   style={{ left: agent.x, top: agent.y }}
                 >
-                  <div className="flex items-start gap-2.5">
-                    <div className="relative shrink-0">
+                <div className="relative shrink-0">
+                  {(() => {
+                    const imgSrc = AGENT_AVATAR_IMAGES[agent.agentKey] ?? DEFAULT_AGENT_IMAGE;
+                    const glow = glowColorForKey(agent.agentKey);
+                    const tiltSeed = hashString(agent.agentKey);
+                    const tiltY = -14 + (tiltSeed % 28); // entre -14deg y +14deg, distinto por agente
+                    return (
                       <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white shadow-lg ${avatarGradient}`}
+                        className={cn(
+                          'relative flex items-center justify-center',
+                          isOrchestrator ? 'h-28 w-28' : 'h-20 w-20'
+                        )}
+                        style={{ perspective: '400px' }}
                       >
-                        {initialsFromName(agent.name)}
+                        {/* "Portal" de luz en los pies, como si saliera del hexágono */}
+                        <div
+                          className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full blur-md"
+                          style={{
+                            width: '85%',
+                            height: '30%',
+                            background: `radial-gradient(ellipse, rgba(${glow},0.85) 0%, rgba(${glow},0.3) 60%, transparent 80%)`,
+                          }}
+                        />
+                        <div
+                          className="pointer-events-none absolute inset-[-30%] rounded-full opacity-70 blur-xl"
+                          style={{
+                            background: `radial-gradient(circle, rgba(${glow},0.55) 0%, rgba(${glow},0.15) 55%, transparent 75%)`,
+                          }}
+                        />
+                        <motion.img
+                          src={imgSrc}
+                          alt={agent.name}
+                          className={cn(
+                            'relative object-contain',
+                            isOrchestrator ? 'h-24 w-24' : 'h-18 w-18'
+                          )}
+                          style={{
+                            transform: `rotateX(8deg) rotateY(${tiltY}deg)`,
+                            filter: `drop-shadow(0 10px 12px rgba(0,0,0,0.5)) drop-shadow(0 0 10px rgba(${glow},0.35))`,
+                          }}
+                          animate={{ y: [0, -4, 0] }}
+                          transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+                        />
                       </div>
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-slate-950 ${statusClass} ${
-                          isWorking ? 'animate-pulse' : ''
-                        }`}
-                      />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="truncate font-heading text-xs font-semibold text-foreground">{agent.name}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">{agent.role}</p>
-                      <p className="mt-0.5 truncate text-[9px] text-muted-foreground/80">
-                        {agent.ensName || `${agent.agentKey}.agent`}
-                      </p>
-                    </div>
+                    );
+                  })()}
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-slate-950 ${statusClass} ${
+                        isWorking ? 'animate-pulse' : ''
+                      }`}
+                    />
                   </div>
 
-                  <p className="mt-1.5 truncate text-[9px] text-muted-foreground/90">
-                    {agent.description || 'Operational'}
-                  </p>
+                  <span
+                    className={cn(
+                      'whitespace-nowrap rounded-full border px-2.5 py-1 font-heading font-semibold text-white shadow-md backdrop-blur-sm',
+                      isOrchestrator
+                        ? 'border-brand/50 bg-brand/25 text-[10px]'
+                        : 'border-border/70 bg-black/80 text-[9px]'
+                    )}
+                  >
+                    {agent.name}
+                  </span>
                 </button>
               );
             })}

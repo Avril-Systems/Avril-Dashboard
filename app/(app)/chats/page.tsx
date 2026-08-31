@@ -1,10 +1,11 @@
-'use client';
+'use client';ReactMarkdown 
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeSanitize from 'rehype-sanitize';
 import {
   AGENT_AREAS,
@@ -739,7 +740,7 @@ export default function ChatsPage() {
                 </p>
                 {m.authorType === 'agent' ? (
                   <div className="chat-markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[rehypeSanitize]}>
                       {m.content}
                     </ReactMarkdown>
                   </div>

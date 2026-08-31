@@ -9,6 +9,7 @@ import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
 import { PaymentModule } from './payment-module';
 import type { Opportunity } from './types';
+import { hasIdeaBeenPaid, markIdeaPaid } from '@/src/lib/paidIdeas';
 
 type GatePhase = 'sign-in' | 'linking' | 'payment';
 
@@ -55,7 +56,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     persistLuckSelection(opportunity);
   }, [opportunity]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!isReady) return;
     let cancelled = false;
 
@@ -74,7 +75,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
         // TODO(billing): session.plan is a demo shortcut, not a reusable deploy entitlement.
         // Production rule: one company deploy = one deploymentIntent + one checkout.
         // See docs/CONTRATOS_INTEGRACION_FLUJOS.md.
-        if (session.plan) {
+        if (session.plan && hasIdeaBeenPaid(freshIdeaId)) {
           onCompleteRef.current(freshIdeaId);
         } else {
           setPhase('payment');
@@ -115,6 +116,7 @@ export function DeployGate({ opportunity, flowSource, onRestart, onComplete }: D
     clearPersistedLuckSelection();
     try {
       const id = ideaIdRef.current ?? (await saveSelection());
+      markIdeaPaid(id);
       onCompleteRef.current(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not continue after payment');

@@ -44,7 +44,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: { message: 'Company name is required.' } }, { status: 400 });
     }
 
-    const flowSource = body.flowSource?.trim() || 'marketing';
+const flowSource = body.flowSource?.trim() || 'marketing';
     const session = readSession(req);
 
     if (!session) {
