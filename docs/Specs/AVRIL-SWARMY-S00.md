@@ -9,9 +9,9 @@
 ## 1. Intención y alcance
 Esta semana construiremos un **primer ciclo funcional, autónomo y observable**: un coordinador entrega trabajo acotado a harnesses (OpenClaw, Hermes; DeepSeek Harness puede ser herramienta de desarrollo/prueba), los agentes dejan mensajes y artefactos en un workspace compartido autorizado, y Avril Dashboard permite ver estados, tareas, handoffs, errores y resultados. En paralelo, QA de Avril Lab mide fricción, capacidad y fallos antes de exposición comercial.
 
-**NO** consiste en mantener cuatro runtimes adicionales solo porque hay cuatro alumnos; tampoco es rehacer Convex, Lab ni lanzar un daemon por prospecto. El número de procesos se decide por arquitectura y mediciones, no por cantidad de personas. Los cuatro estudiantes tienen acceso a 1 OpenClaw + 1 Hermes cada uno como herramientas de trabajo/prueba, **no** es obligación activarlos todos ni a la vez.
+**NO** consiste en mantener cuatro runtimes adicionales solo porque hay cuatro alumnos; tampoco es rehacer Convex, Lab ni lanzar un daemon por prospecto. El número de procesos se decide por arquitectura y mediciones, no por cantidad de personas. Para QA, **Iván y Valeria tienen cada uno 1 OpenClaw + 1 Hermes: cuatro agentes en total**, destinados a probar el producto desde la perspectiva del cliente. Esto es distinto de los **4 harnesses conectados al orquestador** que Kevin y Alejandro deben integrar y observar. No confundir cuatro conectores con cuatro VPS o procesos permanentes.
 
-**Criterio mínimo para el viernes:** una ejecución real y trazable de 2 agentes/harnesses conectados por un orquestador delgado, 1 workspace de prueba, 1 handoff con artefacto, 2 ciclos automáticos limitados, pausa manual efectiva, Dashboard mostrando información persistida tras refrescar, y matriz de pruebas de Lab con defectos priorizados. Si algo es mock, etiquetarlo visiblemente como mock y reportarlo como no logrado.
+**Criterio de aceptación para el viernes:** un orquestador central con 4 harnesses registrados/conectados y observables (sin imponer 4 procesos permanentes), prueba gradual de colaboración y un handoff de incidencia de soporte hacia DeepSeek Harness como agente de código, con artefacto, ACK y propuesta de cambio en rama/PR supervisado (sin escritura directa en main); 2 ciclos automáticos acotados, pausa manual y persistencia visible tras refrescar. Por separado, Iván y Valeria prueban el producto Lab con sus 4 agentes existentes (1 OpenClaw y 1 Hermes por estudiante), además de descargar e instalar el nuevo launcher comercial DeepSeek y verificarlo de punta a punta. No declarar integración o venta operativa sin evidencia. Si algo es mock, etiquetarlo visiblemente como mock y reportarlo como no logrado.
 
 ## 2. Arquitectura acordada y límites
 
@@ -29,7 +29,8 @@ Esta semana construiremos un **primer ciclo funcional, autónomo y observable**:
                   scheduler + queue + supervisor
                 idempotencia + límites + kill switch
                       /                   \
-               OpenClaw adapter       Hermes adapter
+          OpenClaw / Hermes / DeepSeek code adapter
+                   (4 conexiones registradas)
                       \                   /
                 workspace-scoped artifacts
               (no compartir $HOME ni credenciales)
@@ -45,7 +46,7 @@ Esta semana construiremos un **primer ciclo funcional, autónomo y observable**:
   1. `run.started` → `task.created`;
   2. OpenClaw genera `brief.json` sintético;
   3. coordinador registra `message.sent` y `handoff.created`;
-  4. Hermes consume ese artefacto, produce `review.md`, confirma `handoff.acknowledged`;
+  4. El orquestador envía la incidencia al **DeepSeek Harness agente de código** mediante adaptador autorizado; DeepSeek confirma `handoff.acknowledged`, inspecciona en sandbox/rama asignada y produce `diagnosis.md`, `patch.diff` o PR propuesto, y `test-results.json`;
   5. orquestador registra `task.completed` y métricas;
   6. segundo tick autónomo con fixture nuevo y deduplicación verificada.
 - Controles: timeout, retry/backoff, concurrencia, coste/ciclos por run, heartbeat, parada, recuperación de estado, errores visibles y aprobación humana para toda acción externa. SIN envíos a clientes, pagos, publicaciones, compras de VPS ni acciones sobre producción durante S00.
@@ -86,16 +87,16 @@ git push -u origin feat/swarmy-s00-<tu-nombre>
 **Prohibiciones:** no force-push, no cherry-pick masivo del PR #2, no merge automáticos entre repos, no editar historia ajena, no borrar ramas de respaldo hasta revisión. Habilitar branch protection (PR + 1 review + checks + no direct push) cuando el owner tenga controles disponibles. Si faltan permisos de GitHub para un estudiante, un operador crea rama y el estudiante usa fork/PR; no compartir tokens.
 
 ## 4. Equipo Kevin + Alejandro — Dashboard (código, integración y observabilidad)
-**Kevin — control panel y estados:** revisar vistas existentes de Agent Office, establecer la pantalla `workspace → run → tareas/agentes`; mostrar estados reales `queued/running/blocked/completed/failed/stopped`, errores y botón de stop/pause mediante API autenticada; fixtures claramente marcados. Cambios en PR propio.
+**Kevin — control panel y estados:** mostrar en el Dashboard las 4 conexiones de harness, distinguir estado registrado/conectado/ejecutando y exponer la cadena reporte de soporte → handoff a DeepSeek → diagnóstico/parche/PR → revisión humana, con enlaces a evidencias.  revisar vistas existentes de Agent Office, establecer la pantalla `workspace → run → tareas/agentes`; mostrar estados reales `queued/running/blocked/completed/failed/stopped`, errores y botón de stop/pause mediante API autenticada; fixtures claramente marcados. Cambios en PR propio.
 
-**Alejandro — trazas y contratos:** mapear modelo Convex actual, bridge y esquema de eventos; implementar ingest autenticado, timeline de handoffs y referencias a artefactos. Verificar que refresh no pierde historia y un `eventId` repetido no duplica una ejecución; test de autorización entre dos tenants sintéticos. PR propio. Coordinar tipos con Kevin **antes de editar schema/API compartidos**.
+**Alejandro — trazas y contratos:** definir adaptador/capacidad DeepSeek con autentificación y ACK; contrato versionado para soporte (`supportReportRef`, `repository`, `baseBranch`, `allowedPaths`, `codeTaskId`, `patchRef`, `testResultRef`, `pullRequestRef`, `approvalStatus`) y trazabilidad end-to-end. El agente de código jamás recibe credenciales de producción ni mergea sin revisión.  mapear modelo Convex actual, bridge y esquema de eventos; implementar ingest autenticado, timeline de handoffs y referencias a artefactos. Verificar que refresh no pierde historia y un `eventId` repetido no duplica una ejecución; test de autorización entre dos tenants sintéticos. PR propio. Coordinar tipos con Kevin **antes de editar schema/API compartidos**.
 
 **Revisión entre pares:** Kevin revisa PR Alejandro y viceversa. Ninguno integra su PR sin feedback del otro. Entregar capturas, dos runs con runIds, README corto de ejecución, contratos/eventos y errores conocidos. Si la ejecución VPS aún no está autorizada, el Dashboard muestra estado real desde un worker local aislado y etiqueta el impedimento de VPS.
 
 ## 5. Equipo Iván + Valeria — Lab QA / autonomía experimental
-**Iván — flujo/harness:** sobre Lab `feat/rent-agent`, reproducir happy path OpenClaw y Hermes en entorno autorizado de prueba; usar DeepSeek Harness local como asistente de código/QA y NVIDIA Nemotron como opción cuando sus credenciales de inferencia autorizadas lo permitan. Probar un flujo corto de colaboración end-to-end con el coordinador; entregar inputs/outputs sintéticos, fallos y pasos de reproducción. No convertir seats de venta en daemons persistentes.
+**Iván — flujo/harness:** con su 1 OpenClaw y 1 Hermes, probar la descarga, instalación, arranque, funcionamiento y reinicio del nuevo **launcher comercial de DeepSeek** en staging, además del happy path de los launchers existentes; registrar versión/artefacto, fallos reproducibles y compatibilidad.  sobre Lab `feat/rent-agent`, reproducir happy path OpenClaw y Hermes en entorno autorizado de prueba; usar DeepSeek Harness local como asistente de código/QA y NVIDIA Nemotron como opción cuando sus credenciales de inferencia autorizadas lo permitan. Probar un flujo corto de colaboración end-to-end con el coordinador; entregar inputs/outputs sintéticos, fallos y pasos de reproducción. No convertir seats de venta en daemons persistentes.
 
-**Valeria — QA, stress progresivo y fricción:** recorrido de usuario Lab, wizard, estados ready/error, claves, reintentos y caducidad; carga incremental `1 → 2 → 4` **solo si la capacidad disponible y el entorno aislado lo permiten**. Medir RAM/CPU/latencia/costo y errores, sin asumir que 4 instancias caben en el VPS. Simular caída del proveedor, 429, timeout, duplicados, reinicio, aislamiento y `kill switch`. Registrar defectos `P0` seguridad/pago/datos; `P1` flujo roto; `P2` UX/cosmética, con evidencia y reproducción.
+**Valeria — QA, stress progresivo y fricción:** con su 1 OpenClaw y 1 Hermes, repetir de forma independiente el recorrido completo del cliente para adquirir/descargar/instalar/activar/utilizar el launcher DeepSeek en entorno de prueba (pagos simulados, sin Stripe Live), junto con pruebas de permisos, errores, reintentos, rollback y experiencia de usuario; registrar evidencia y go/no-go comercial.  recorrido de usuario Lab, wizard, estados ready/error, claves, reintentos y caducidad; carga incremental `1 → 2 → 4` **solo si la capacidad disponible y el entorno aislado lo permiten**. Medir RAM/CPU/latencia/costo y errores, sin asumir que 4 instancias caben en el VPS. Simular caída del proveedor, 429, timeout, duplicados, reinicio, aislamiento y `kill switch`. Registrar defectos `P0` seguridad/pago/datos; `P1` flujo roto; `P2` UX/cosmética, con evidencia y reproducción.
 
 **Entregables:** `AVRIL-SWARMY-S00-QA.md`, tabla de 8–12 casos, capturas/redacted logs, al menos 3 bugs o mejoras bien sustentados **si existen** (no inventarlos), sugerencia go/no-go y revisión cruzada del demo Dashboard. Reportar si una prueba no se pudo realizar. No tocar Stripe Live, Caddy, puertos, compras Contabo, contenedores comerciales o los datos reales.
 
@@ -103,7 +104,7 @@ git push -u origin feat/swarmy-s00-<tu-nombre>
 - Control estricto de permisos: no SSH ni sudo dentro de agentes, no secretos en prompts, repos, logs o chat; las llaves NVIDIA/alternativas viven en el entorno seguro de cada alumno y se rotan por configuración sin copiar entre personas.
 - Para coordinar worker en VPS se necesita **aprobación del operador**: staging aislado, volúmenes dedicados, healthcheck, reinicio, logs, límites CPU/RAM, presupuesto y `kill switch` verificable. No repetir clon `LaunchEnterprise` que provocó colisiones de puertos y referencias prohibidas.
 - La máquina `vps-avril01` fue auditada en el backlog como host mixto de **8 GB**, no asumir 24 GB ni disponibilidad para 8 nuevos agentes. Hacer preflight y documentar cuál VPS está realmente asignado antes de cualquier prueba de carga.
-- DeepSeek Harness es herramienta complementaria local; NO prometer adaptador de ejecución nativo sin validarlo. Si un proveedor sufre rate limit, registrar fallo y usar un fallback permitido/configurado, no automatizar abuso o evasión de límites.
+- El contrato del launcher de DeepSeek se reporta **listo por el owner**; confirmar su ubicación, formato, versión y condiciones antes de integrar. DeepSeek es **tercer tipo de harness comercial y destino del handoff de soporte a agente de código**. La existencia de contrato no acredita instalador, adaptador, cobro ni integración: verificar cada etapa con pruebas. No ofrecerlo como listo para venta hasta superar QA. El número cuatro de conexiones es capacidad requerida del orquestador, no cuatro tecnologías distintas. Si un proveedor sufre rate limit, registrar fallo y usar un fallback permitido/configurado, no automatizar abuso o evasión de límites.
 
 ## 7. Plan miércoles-viernes y gates
 
@@ -115,9 +116,9 @@ git push -u origin feat/swarmy-s00-<tu-nombre>
 | Vie 13 16:00 | Congelar código, runbook y captura demo | Repetir defectos críticos y consolidar matriz |
 | Vie 13 18:00 | Demostración + PRs para revisión final | Reporte, bugs priorizados, go/no-go |
 
-**DoD / GO interno:** escenario de dos harnesses comprobado con eventos reales; stop, autorización e idempotencia probados; dos ticks sin intervención; persistencia tras refresco; QA Lab reproducible; cero incidentes sobre producción; y documentación suficiente para rotación de equipos. Si el VPS o un adaptador no está listo, entrega parcial honesta con blockers y plan siguiente, no considerar completado.
+**DoD / GO interno:** 4 harnesses conectados/observables y prueba real de handoff de soporte hacia DeepSeek, con aprobación de cambios y eventos reales; stop, autorización e idempotencia probados; dos ticks sin intervención; persistencia tras refresco; QA Lab reproducible; cero incidentes sobre producción; y documentación suficiente para rotación de equipos. Si el VPS o un adaptador no está listo, entrega parcial honesta con blockers y plan siguiente, no considerar completado.
 
-**No se exige esta semana:** autonomía comercial 24/7 en producción, 4 agentes simultáneos, outreach automático, contratos de clientes ni facturación real. `DRY_RUN` no autoriza permanencia indefinida.
+**No se exige esta semana:** autonomía comercial 24/7 en producción, 4 procesos simultáneos en Engine, outreach automático, contratos de clientes ni facturación real. `DRY_RUN` no autoriza permanencia indefinida.
 
 ## 8. Documentación que sobrevive a la rotación
 Conservar en `docs/Specs/`: este SDD, `AVRIL-SWARMY-S00-CONTRACTS.md` (esquemas definitivos y decisiones), `AVRIL-SWARMY-S00-RUNBOOK.md` (setup, start, stop, recuperación, rollback), `AVRIL-SWARMY-S00-TEST-REPORT.md` (escenarios y evidencias). Puede entregarse una sola pieza combinada si los encabezados permiten ubicarlo todo. Trello gestiona responsables/fechas; GitHub gestiona fuente/versionado, no duplicar el texto canónico en cada tarjeta.
@@ -125,3 +126,11 @@ Conservar en `docs/Specs/`: este SDD, `AVRIL-SWARMY-S00-CONTRACTS.md` (esquemas 
 **Cambio de alcance:** cualquier modificación a la arquitectura, permisos, branches, VPS o producción se propone en PR al SDD y requiere validación de Gerry. Las tarjetas de ciclos anteriores que prohibían tocar repos/VPS quedan reemplazadas **solo para el desarrollo en ramas y QA aislada explícitamente autorizados aquí**; operaciones productivas siguen reservadas al operador.
 
 **Referencias:** README/ARCHITECTURE/BRIDGE_CONTRACT y Convex de Avril-Dashboard; C2 SDD y e2e Lab; PR #1 fusionado; PR #2 conflictivo; Trello S00, EGE-02/03 y C3 QA.
+
+## 9. Addendum de alcance — DeepSeek y separación de equipos (11 nov, 12:55 CDMX)
+
+**Equipo Dashboard (Kevin/Alejandro):** 1 orquestador central + 4 conexiones/harnesses administrados; introducir DeepSeek Harness como agente de código al que otro harness puede entregar un reporte de soporte. Contrato report→handoff→ACK→inspección sandbox→patch/PR propuesto→review/approval→resultado, todo observable y persistido en Dashboard. No ejecución de cambios en producción, merge automático ni escritura fuera de la rama autorizada.
+
+**Equipo Lab (Iván/Valeria):** cuatro agentes de QA existentes, 2 por persona (OpenClaw + Hermes). Probar el nuevo launcher de DeepSeek de cara al cliente: adquisición simulada, descarga, integridad/versionado, instalación, onboarding, arranque, uso básico, errores, stop/restart y recuperación. Reportar defectos para que recorran el mismo canal de soporte y handoff; no son cuatro harnesses adicionales del Engine.
+
+**Dependencia:** el contrato de launcher DeepSeek se considera disponible según indicación del owner, pero aún hay que localizar y validar el artefacto técnico; ningún check se marca completado antes de ejecución verificable. Si hay bloqueo, conservar la evidencia de UI/contrato y etiquetar claramente la parte simulada.
