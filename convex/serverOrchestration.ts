@@ -410,4 +410,62 @@ export const healSessionDisplayNamesServer = mutation({
 
     return { healed, scanned: sessions.length };
   },
+
+  // --- Mutación para Ingestión de Eventos S00 (Alejandro) ---
+export const ingestEvent = mutation({
+  args: {
+    version: v.string(),
+    tenantId: v.string(),
+    workspaceId: v.string(),
+    runId: v.string(),
+    eventType: v.union(
+      v.literal("run"),
+      v.literal("tarea"),
+      v.literal("mensaje"),
+      v.literal("handoff"),
+      v.literal("artefacto"),
+      v.literal("error")
+    ),
+    payload: v.any(),
+    idempotencyKey: v.string(), // Clave para evitar duplicados
+    
+    // Trazabilidad de código y DeepSeek
+    repository: v.optional(v.string()),
+    branch: v.optional(v.string()),
+    allowedRoutes: v.optional(v.array(v.string())),
+    patchRef: v.optional(v.string()),
+    testResultRef: v.optional(v.string()),
+    prRef: v.optional(v.string()),
+    humanApprovalRequired: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    // 1. Verificación de Idempotencia (Regla S00)
+    const existingEvent = await ctx.db
+      .query("orchestratorEvents")
+      .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", args.idempotencyKey))
+      .first();
+
+    // Si ya existe, devolvemos un aviso pero NO insertamos un duplicado.
+    if (existingEvent) {
+      return {
+        status: "idempotent_hit",
+        eventId: existingEvent._id,
+        message: "Evento ignorado: Ya fue registrado previamente.",
+      };
+    }
+
+    // 2. Si es un evento nuevo, lo insertamos
+    const timestamp = Date.now();
+    const eventId = await ctx.db.insert("orchestratorEvents", {
+      ...args,
+      ack: true, 
+      timestamp: timestamp,
+    });
+
+    return {
+      status: "success",
+      eventId: eventId,
+    };
+  },
+});
 });
