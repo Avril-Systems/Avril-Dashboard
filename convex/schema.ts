@@ -293,5 +293,13 @@ export default defineSchema({
     humanApproved: v.optional(v.boolean()),
   })
   .index("by_tenant_run", ["tenantId", "runId"])
-  .index("by_idempotency", ["idempotencyKey"])
+  .index("by_idempotency", ["idempotencyKey"]),
+
+
+// Registro de conexiones activas sin procesos permanentes (Heartbeats)
+orchestratorConnections: defineTable({
+  connectionId: v.string(),
+  tenantId: v.string(),
+  lastHeartbeat: v.number(), // Timestamp del último ping recibido
+}).index("by_connection", ["connectionId"]),
 });

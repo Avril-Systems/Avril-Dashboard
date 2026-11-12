@@ -49,6 +49,14 @@ export const runTests = action({
     console.log("Resultado B1:", resultB1);
 
     console.log("\n--- PRUEBAS COMPLETADAS. TOMA CAPTURA DE ESTO PARA TU PR ---");
+    // --- PRUEBA DE LAS 4 CONEXIONES OBSERVABLES ---
+console.log("\n4. Simulando 4 conexiones (Heartbeats)...");
+await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_1", tenantId: "ws_A" });
+await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_2", tenantId: "ws_A" });
+await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_3", tenantId: "ws_B" });
+await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_4", tenantId: "ws_B" });
+
+console.log("¡4 conexiones registradas exitosamente sin procesos persistentes!");
     return { success: true };
   }
 });

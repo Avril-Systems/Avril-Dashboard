@@ -2,6 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
 import { deriveCompanyDisplayName, isPlaceholderChatTitle } from './lib/companyDisplayName';
+import { query } from "./_generated/server";
 
 const SERVER_SECRET_ENV = 'CONVEX_SERVER_SECRET';
 
@@ -467,5 +468,44 @@ export const ingestEvent = mutation({
       status: "success",
       eventId: eventId,
     };
+  },
+});
+
+// Mutación para que los agentes avisen que siguen vivos
+export const pingConnection = mutation({
+  args: {
+    connectionId: v.string(),
+    tenantId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const db = ctx.db as any;
+    const existing = await db
+      .query("orchestratorConnections")
+      .withIndex("by_connection", (q: any) => q.eq("connectionId", args.connectionId))
+      .first();
+
+    const now = Date.now();
+    if (existing) {
+      await db.patch(existing._id, { lastHeartbeat: now });
+    } else {
+      await db.insert("orchestratorConnections", {
+        ...args,
+        lastHeartbeat: now,
+      });
+    }
+  },
+});
+
+// Query para observar las conexiones activas desde el Dashboard
+export const getActiveConnections = query({
+  args: {},
+  handler: async (ctx) => {
+    const db = ctx.db as any;
+    const connections = await db.query("orchestratorConnections").collect();
+    const now = Date.now();
+    
+    // Filtramos solo las conexiones que han dado señales de vida en los últimos 30 seg
+    const UMBRAL_ACTIVO = 30 * 1000; 
+    return connections.filter((conn: { lastHeartbeat: number }) => (now - conn.lastHeartbeat) < UMBRAL_ACTIVO);
   },
 });
