@@ -410,6 +410,7 @@ export const healSessionDisplayNamesServer = mutation({
 
     return { healed, scanned: sessions.length };
   },
+});
 
   // --- Mutación para Ingestión de Eventos S00 (Alejandro) ---
 export const ingestEvent = mutation({
@@ -467,5 +468,4 @@ export const ingestEvent = mutation({
       eventId: eventId,
     };
   },
-});
 });
