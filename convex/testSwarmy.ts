@@ -13,7 +13,7 @@ export const runTests = action({
       tenantId: "TENANT_A_SINTETICO",
       workspaceId: "ws_A",
       runId: "run_001",
-      eventType: "run",
+      eventType: "support.report.received", // <--- ACTUALIZADO AL NUEVO CONTRATO
       payload: { accion: "iniciar_agente_deepseek", datos: "ok" },
       idempotencyKey: "idem_key_001",
       humanApprovalRequired: true
@@ -27,7 +27,7 @@ export const runTests = action({
       tenantId: "TENANT_A_SINTETICO",
       workspaceId: "ws_A",
       runId: "run_001",
-      eventType: "run",
+      eventType: "support.report.received", // <--- ACTUALIZADO AL NUEVO CONTRATO
       payload: { accion: "iniciar_agente_deepseek", datos: "ok" },
       idempotencyKey: "idem_key_001", // <--- Misma llave exacta
       humanApprovalRequired: true
@@ -41,22 +41,23 @@ export const runTests = action({
       tenantId: "TENANT_B_SINTETICO",
       workspaceId: "ws_B",
       runId: "run_999",
-      eventType: "tarea",
+      eventType: "diagnosis.ready", // <--- ACTUALIZADO AL NUEVO CONTRATO
       payload: { accion: "validar_codigo_nemotron" },
       idempotencyKey: "idem_key_B_001", // Llave nueva
       humanApprovalRequired: false
     });
     console.log("Resultado B1:", resultB1);
 
-    console.log("\n--- PRUEBAS COMPLETADAS. TOMA CAPTURA DE ESTO PARA TU PR ---");
+    console.log("\n--- PRUEBAS COMPLETADAS. ---");
+    
     // --- PRUEBA DE LAS 4 CONEXIONES OBSERVABLES ---
-console.log("\n4. Simulando 4 conexiones (Heartbeats)...");
-await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_1", tenantId: "ws_A" });
-await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_2", tenantId: "ws_A" });
-await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_3", tenantId: "ws_B" });
-await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_4", tenantId: "ws_B" });
+    console.log("\n4. Simulando 4 conexiones (Heartbeats)...");
+    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_1", tenantId: "ws_A" });
+    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_2", tenantId: "ws_A" });
+    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_3", tenantId: "ws_B" });
+    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_4", tenantId: "ws_B" });
 
-console.log("¡4 conexiones registradas exitosamente sin procesos persistentes!");
+    console.log("¡4 conexiones registradas exitosamente sin procesos persistentes!");
     return { success: true };
   }
 });

@@ -421,12 +421,18 @@ export const ingestEvent = mutation({
     workspaceId: v.string(),
     runId: v.string(),
     eventType: v.union(
-      v.literal("run"),
-      v.literal("tarea"),
-      v.literal("mensaje"),
-      v.literal("handoff"),
-      v.literal("artefacto"),
-      v.literal("error")
+      v.literal("support.report.received"),
+      v.literal("handoff.created"),
+      v.literal("handoff.ack"),
+      v.literal("diagnosis.ready"),
+      v.literal("patch.proposed"),
+      v.literal("approval.decided"),
+      v.literal("run.result"),
+      v.literal("run.pause"),
+      v.literal("run.pause.confirmed"),
+      v.literal("error.reported"),
+      v.literal("agent.paused"),
+      v.literal("agent.stopped")
     ),
     payload: v.any(),
     idempotencyKey: v.string(), // Clave para evitar duplicados
