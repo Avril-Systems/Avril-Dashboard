@@ -2,7 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
 import { deriveCompanyDisplayName, isPlaceholderChatTitle } from './lib/companyDisplayName';
-import { query } from "./_generated/server";
+
 
 const SERVER_SECRET_ENV = 'CONVEX_SERVER_SECRET';
 
