@@ -4,60 +4,130 @@ import { api } from "./_generated/api";
 export const runTests = action({
   args: {},
   handler: async (ctx) => {
-    console.log("--- INICIANDO PRUEBA S00 (ALEJANDRO) ---");
+    const validSecret = process.env.CONVEX_SERVER_SECRET;
+    if (!validSecret) {
+      throw new Error("Falta CONVEX_SERVER_SECRET en el entorno de Convex.");
+    }
 
-    // 1. Simular Tenant A (Cliente 1)
-    console.log("1. Insertando evento de Tenant A...");
-    const resultA1 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+    console.log("=== INICIANDO SUITE DE TESTS W46 P0 (SEGURIDAD + AISLAMIENTO) ===");
+
+    // TEST 1: Acceso anónimo / secreto inválido debe ser denegado
+    console.log("\n[TEST 1] Validando rechazo de acceso no autorizado...");
+    let unauthorizedBlocked = false;
+    try {
+      await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+        serverSecret: "secreto_falso_123",
+        version: "v1.0",
+        tenantId: "TENANT_A",
+        workspaceId: "ws_A",
+        runId: "run_unauth",
+        eventType: "support.report.received",
+        payload: { isMock: true },
+        idempotencyKey: "idem_unauth",
+        humanApprovalRequired: false,
+      });
+    } catch (err) {
+      unauthorizedBlocked = true;
+      console.log("PASS - Escritura anónima bloqueada:", (err as Error).message);
+    }
+    if (!unauthorizedBlocked) {
+      throw new Error("FAIL - Se permitió escribir con un secreto inválido.");
+    }
+
+    // TEST 2: Escritura en Tenant A e Idempotencia por Tenant
+    console.log("\n[TEST 2] Validando escritura e idempotencia por tenant...");
+    const resA1 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+      serverSecret: validSecret,
       version: "v1.0",
-      tenantId: "TENANT_A_SINTETICO",
+      tenantId: "TENANT_A",
       workspaceId: "ws_A",
-      runId: "run_001",
-      eventType: "support.report.received", // <--- ACTUALIZADO AL NUEVO CONTRATO
-      payload: { accion: "iniciar_agente_deepseek", datos: "ok" },
-      idempotencyKey: "idem_key_001",
-      humanApprovalRequired: true
+      runId: "run_test_A",
+      eventType: "support.report.received",
+      payload: { ticketId: "T-01", isMock: true },
+      idempotencyKey: "shared_idem_key_001",
+      humanApprovalRequired: false,
     });
-    console.log("Resultado A1:", resultA1);
+    console.log("Tenant A (1er envío):", resA1.status);
 
-    // 2. Probar Idempotencia (Simular que la red falló y se reenvió el mismo evento)
-    console.log("\n2. Probando IDEMPOTENCIA (mismo evento, misma llave)...");
-    const resultA2 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+    const resA2 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+      serverSecret: validSecret,
       version: "v1.0",
-      tenantId: "TENANT_A_SINTETICO",
+      tenantId: "TENANT_A",
       workspaceId: "ws_A",
-      runId: "run_001",
-      eventType: "support.report.received", // <--- ACTUALIZADO AL NUEVO CONTRATO
-      payload: { accion: "iniciar_agente_deepseek", datos: "ok" },
-      idempotencyKey: "idem_key_001", // <--- Misma llave exacta
-      humanApprovalRequired: true
+      runId: "run_test_A",
+      eventType: "support.report.received",
+      payload: { ticketId: "T-01", isMock: true },
+      idempotencyKey: "shared_idem_key_001",
+      humanApprovalRequired: false,
     });
-    console.log("Resultado A2 (Debería decir 'Evento ignorado'):", resultA2);
+    console.log("Tenant A (duplicado):", resA2.status);
+    if (resA2.status !== "idempotent_hit") {
+      throw new Error("FAIL - No se deduplicó el evento repetido en Tenant A.");
+    }
 
-    // 3. Simular Tenant B (Aislamiento de clientes)
-    console.log("\n3. Insertando evento de Tenant B (Aislamiento)...");
-    const resultB1 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+    // Misma idempotencyKey en Tenant B SÍ debe permitirse (aislamiento de llaves)
+    const resB1 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+      serverSecret: validSecret,
       version: "v1.0",
-      tenantId: "TENANT_B_SINTETICO",
+      tenantId: "TENANT_B",
       workspaceId: "ws_B",
-      runId: "run_999",
-      eventType: "diagnosis.ready", // <--- ACTUALIZADO AL NUEVO CONTRATO
-      payload: { accion: "validar_codigo_nemotron" },
-      idempotencyKey: "idem_key_B_001", // Llave nueva
-      humanApprovalRequired: false
+      runId: "run_test_B",
+      eventType: "handoff.created",
+      payload: { handoffId: "h-B", isMock: true },
+      idempotencyKey: "shared_idem_key_001",
+      humanApprovalRequired: true,
     });
-    console.log("Resultado B1:", resultB1);
+    console.log("Tenant B (misma llave en otro tenant):", resB1.status);
+    if (resB1.status !== "success") {
+      throw new Error("FAIL - La idempotencia de Tenant A bloqueó a Tenant B.");
+    }
 
-    console.log("\n--- PRUEBAS COMPLETADAS. ---");
-    
-    // --- PRUEBA DE LAS 4 CONEXIONES OBSERVABLES ---
-    console.log("\n4. Simulando 4 conexiones (Heartbeats)...");
-    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_1", tenantId: "ws_A" });
-    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_2", tenantId: "ws_A" });
-    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_3", tenantId: "ws_B" });
-    await ctx.runMutation(api.serverOrchestration.pingConnection, { connectionId: "worker_4", tenantId: "ws_B" });
+    // TEST 3: Aislamiento de lectura (Tenant B no puede leer run_test_A)
+    console.log("\n[TEST 3] Validando aislamiento de lectura cruzada...");
+    const leakCheck = await ctx.runQuery(api.serverOrchestration.getEventsByRun, {
+      serverSecret: validSecret,
+      tenantId: "TENANT_B",
+      runId: "run_test_A",
+    });
+    console.log("Eventos de Tenant A visibles para Tenant B:", leakCheck.length);
+    if (leakCheck.length !== 0) {
+      throw new Error("FAIL - Fuga de datos entre tenants detectada.");
+    }
 
-    console.log("¡4 conexiones registradas exitosamente sin procesos persistentes!");
+    const ownCheck = await ctx.runQuery(api.serverOrchestration.getEventsByRun, {
+      serverSecret: validSecret,
+      tenantId: "TENANT_A",
+      runId: "run_test_A",
+    });
+    console.log("Eventos propios de Tenant A recuperados:", ownCheck.length);
+
+    // TEST 4: Heartbeats de los 4 harnesses aislados por tenant
+    console.log("\n[TEST 4] Validando 4 conexiones (heartbeats) coordinadas...");
+    const harnesses = ["support", "b2b", "prospecting", "marketing"];
+    for (const h of harnesses) {
+      await ctx.runMutation(api.serverOrchestration.pingConnection, {
+        serverSecret: validSecret,
+        connectionId: h,
+        tenantId: "TENANT_A",
+        harnessType: h,
+        executing: h === "support",
+        isMock: true,
+      });
+    }
+    const connsA = await ctx.runQuery(api.serverOrchestration.getActiveConnections, {
+      serverSecret: validSecret,
+      tenantId: "TENANT_A",
+    });
+    const connsB = await ctx.runQuery(api.serverOrchestration.getActiveConnections, {
+      serverSecret: validSecret,
+      tenantId: "TENANT_B",
+    });
+    console.log(`Conexiones activas -> Tenant A: ${connsA.length}, Tenant B: ${connsB.length}`);
+    if (connsA.length !== 4 || connsB.length !== 0) {
+      throw new Error("FAIL - Aislamiento de conexiones incorrecto.");
+    }
+
+    console.log("\n=== TODOS LOS TESTS DE SEGURIDAD Y CONTRATO PASARON (PASS) ===");
     return { success: true };
-  }
+  },
 });

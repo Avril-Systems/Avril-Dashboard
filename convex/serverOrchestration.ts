@@ -413,9 +413,10 @@ export const healSessionDisplayNamesServer = mutation({
   },
 });
 
-  // --- Mutación para Ingestión de Eventos S00 (Alejandro) ---
+  // --- Mutación autenticada para Ingestión de Eventos (S00 / W46) ---
 export const ingestEvent = mutation({
   args: {
+    serverSecret: v.string(),
     version: v.string(),
     tenantId: v.string(),
     workspaceId: v.string(),
@@ -431,12 +432,14 @@ export const ingestEvent = mutation({
       v.literal("run.pause"),
       v.literal("run.pause.confirmed"),
       v.literal("error.reported"),
+      v.literal("agent.command.sent"),
+      v.literal("agent.status"),
       v.literal("agent.paused"),
       v.literal("agent.stopped")
     ),
     payload: v.any(),
-    idempotencyKey: v.string(), // Clave para evitar duplicados
-    
+    idempotencyKey: v.string(),
+
     // Trazabilidad de código y DeepSeek
     repository: v.optional(v.string()),
     branch: v.optional(v.string()),
@@ -447,71 +450,173 @@ export const ingestEvent = mutation({
     humanApprovalRequired: v.boolean(),
   },
   handler: async (ctx, args) => {
-    // 1. Verificación de Idempotencia (Regla S00)
+    // 1. Denegar acceso anónimo o secreto inválido
+    requireServerSecret(args.serverSecret);
+
+    // 2. Verificación de Idempotencia POR TENANT
     const existingEvent = await ctx.db
       .query("orchestratorEvents")
-      .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", args.idempotencyKey))
+      .withIndex("by_tenant_idempotency", (q) =>
+        q.eq("tenantId", args.tenantId).eq("idempotencyKey", args.idempotencyKey)
+      )
       .first();
 
-    // Si ya existe, devolvemos un aviso pero NO insertamos un duplicado.
     if (existingEvent) {
       return {
-        status: "idempotent_hit",
+        status: "idempotent_hit" as const,
         eventId: existingEvent._id,
-        message: "Evento ignorado: Ya fue registrado previamente.",
+        message: "Evento ignorado: Ya fue registrado previamente para este tenant.",
       };
     }
 
-    // 2. Si es un evento nuevo, lo insertamos
+    // 3. Extraemos serverSecret para NO persistirlo nunca en la base de datos
+    const { serverSecret: _secret, ...eventData } = args;
     const timestamp = Date.now();
+
     const eventId = await ctx.db.insert("orchestratorEvents", {
-      ...args,
-      ack: true, 
-      timestamp: timestamp,
+      ...eventData,
+      ack: true,
+      timestamp,
     });
 
     return {
-      status: "success",
-      eventId: eventId,
+      status: "success" as const,
+      eventId,
     };
   },
 });
 
-// Mutación para que los agentes avisen que siguen vivos
-export const pingConnection = mutation({
+// Consulta autenticada por tenant y runId (formato compatible con EventItem de Kevin)
+export const getEventsByRun = query({
   args: {
-    connectionId: v.string(),
+    serverSecret: v.string(),
     tenantId: v.string(),
+    runId: v.string(),
   },
   handler: async (ctx, args) => {
-    const db = ctx.db as any;
-    const existing = await db
+    requireServerSecret(args.serverSecret);
+
+    const events = await ctx.db
+      .query("orchestratorEvents")
+      .withIndex("by_tenant_run", (q) =>
+        q.eq("tenantId", args.tenantId).eq("runId", args.runId)
+      )
+      .collect();
+
+    return events
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((ev) => ({
+        _id: ev._id,
+        type: ev.eventType,
+        createdAt: new Date(ev.timestamp).toISOString(),
+        payload: ev.payload,
+        runId: ev.runId,
+        version: ev.version,
+        patchRef: ev.patchRef,
+        prRef: ev.prRef,
+      }));
+  },
+});
+
+// Consulta autenticada de eventos recientes por tenant (para refresh del Dashboard)
+export const listEventsByTenant = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const take = Math.max(1, Math.min(args.limit ?? 100, 500));
+    const events = await ctx.db
+      .query("orchestratorEvents")
+      .withIndex("by_tenant_time", (q) => q.eq("tenantId", args.tenantId))
+      .order("desc")
+      .take(take);
+
+    return events.reverse().map((ev) => ({
+      _id: ev._id,
+      type: ev.eventType,
+      createdAt: new Date(ev.timestamp).toISOString(),
+      payload: ev.payload,
+      runId: ev.runId,
+      version: ev.version,
+      patchRef: ev.patchRef,
+      prRef: ev.prRef,
+    }));
+  },
+});
+
+// Mutación autenticada para registrar latidos (Heartbeats) por tenant
+export const pingConnection = mutation({
+  args: {
+    serverSecret: v.string(),
+    connectionId: v.string(),
+    tenantId: v.string(),
+    harnessType: v.optional(v.string()),
+    executing: v.optional(v.boolean()),
+    isMock: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const existing = await ctx.db
       .query("orchestratorConnections")
-      .withIndex("by_connection", (q: any) => q.eq("connectionId", args.connectionId))
+      .withIndex("by_tenant_connection", (q) =>
+        q.eq("tenantId", args.tenantId).eq("connectionId", args.connectionId)
+      )
       .first();
 
     const now = Date.now();
     if (existing) {
-      await db.patch(existing._id, { lastHeartbeat: now });
-    } else {
-      await db.insert("orchestratorConnections", {
-        ...args,
+      await ctx.db.patch(existing._id, {
         lastHeartbeat: now,
+        ...(args.harnessType !== undefined ? { harnessType: args.harnessType } : {}),
+        ...(args.executing !== undefined ? { executing: args.executing } : {}),
+        ...(args.isMock !== undefined ? { isMock: args.isMock } : {}),
       });
+      return existing._id;
     }
+
+    const { serverSecret: _secret, ...connData } = args;
+    return await ctx.db.insert("orchestratorConnections", {
+      ...connData,
+      lastHeartbeat: now,
+    });
   },
 });
 
-// Query para observar las conexiones activas desde el Dashboard
+// Query autenticada y aislada por tenant (alineada con HEARTBEAT_STALE_MS = 60000 de Kevin)
 export const getActiveConnections = query({
-  args: {},
-  handler: async (ctx) => {
-    const db = ctx.db as any;
-    const connections = await db.query("orchestratorConnections").collect();
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const connections = await ctx.db
+      .query("orchestratorConnections")
+      .withIndex("by_tenant_connection", (q) => q.eq("tenantId", args.tenantId))
+      .collect();
+
     const now = Date.now();
-    
-    // Filtramos solo las conexiones que han dado señales de vida en los últimos 30 seg
-    const UMBRAL_ACTIVO = 30 * 1000; 
-    return connections.filter((conn: { lastHeartbeat: number }) => (now - conn.lastHeartbeat) < UMBRAL_ACTIVO);
+    const UMBRAL_ACTIVO = 60 * 1000;
+
+    return connections
+      .filter((conn) => now - conn.lastHeartbeat < UMBRAL_ACTIVO)
+      .map((conn) => ({
+        agentKey: conn.connectionId,
+        name: conn.connectionId,
+        status: conn.executing ? "working" : "idle",
+        meta: {
+          harnessType: conn.harnessType ?? conn.connectionId,
+          connected: true,
+          executing: conn.executing ?? false,
+          lastHeartbeatAt: new Date(conn.lastHeartbeat).toISOString(),
+          isMock: conn.isMock,
+        },
+      }));
   },
 });
