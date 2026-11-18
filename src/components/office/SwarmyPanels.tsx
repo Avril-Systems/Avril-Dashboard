@@ -34,7 +34,7 @@ const TONE_CLASS: Record<Tone, string> = {
   muted: 'border-border/60 bg-surface/40 text-muted-foreground',
 };
 
-function Pill({ label, tone, title }: { label: string; tone: Tone; title?: string }) {
+export function Pill({ label, tone, title }: { label: string; tone: Tone; title?: string }) {
   return (
     <span
       title={title}
@@ -85,7 +85,7 @@ function isHttpUrl(s?: string) {
 
 // ---------------------------------------------------------------- cadena de handoff
 
-export function HandoffChainPanel({ events }: { events: SwarmyEvent[] }) {
+export function HandoffChainPanel({ events, fallbackRunId }: { events: SwarmyEvent[]; fallbackRunId?: string }) {
   const { chain, runId, blockedSteps } = useMemo(() => {
     const normalized = normalizeEvents(events) as SwarmyEvent[];
     const view = deriveHandoffChain(normalized);
@@ -121,7 +121,7 @@ export function HandoffChainPanel({ events }: { events: SwarmyEvent[] }) {
       </div>
 
       <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground">
-        <p>runId · {runId ?? '—'}</p>
+        <p>runId · {runId ?? (fallbackRunId ? `${fallbackRunId} (id de la URL)` : '—')}</p>
         <p>handoffId · {chain.handoffId ?? '—'}</p>
       </div>
 

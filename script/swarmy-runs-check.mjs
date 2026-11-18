@@ -38,3 +38,11 @@ test('eventos sin runId se ignoran; lista vacía no revienta', () => {
   assert.equal(groupRuns([ev('a', undefined, 0), ev('a', '  ', 1)]).length, 0);
   assert.deepEqual(groupRuns([]), []);
 });
+
+test('hasReal solo si algún payload trae isMock:false explícito', () => {
+  assert.equal(groupRuns([ev('a', 'r1', 0)])[0].hasReal, false);
+  assert.equal(groupRuns([ev('a', 'r1', 0, { isMock: true })])[0].hasReal, false);
+  assert.equal(groupRuns([ev('a', 'r1', 0, { isMock: false })])[0].hasReal, true);
+  const mixed = groupRuns([ev('a', 'r1', 0, { isMock: true }), ev('b', 'r1', 1, { isMock: false })])[0];
+  assert.equal(mixed.hasMock && mixed.hasReal, true);
+});

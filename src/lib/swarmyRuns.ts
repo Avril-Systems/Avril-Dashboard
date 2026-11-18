@@ -11,6 +11,8 @@ export type RunSummary = {
   eventCount: number;
   lastType: string;
   hasMock: boolean;
+  /** algún evento declara isMock:false explícitamente */
+  hasReal: boolean;
   blocked: boolean;
 };
 
@@ -39,6 +41,7 @@ export function groupRuns(events: RunEventLike[]): RunSummary[] {
         eventCount: 1,
         lastType: e.type,
         hasMock: p.isMock === true,
+        hasReal: p.isMock === false,
         blocked: isBlocked,
       });
       continue;
@@ -50,6 +53,7 @@ export function groupRuns(events: RunEventLike[]): RunSummary[] {
       cur.lastType = e.type;
     }
     if (p.isMock === true) cur.hasMock = true;
+    if (p.isMock === false) cur.hasReal = true;
     if (isBlocked) cur.blocked = true;
   }
   return [...byRun.values()].sort((a, b) => ms(b.lastAt) - ms(a.lastAt));
