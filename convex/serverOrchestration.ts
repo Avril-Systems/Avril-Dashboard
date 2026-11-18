@@ -596,27 +596,32 @@ export const getActiveConnections = query({
   handler: async (ctx, args) => {
     requireServerSecret(args.serverSecret);
 
+    const now = Date.now();
+    const HEARTBEAT_TTL_MS = 60_000;
+
     const connections = await ctx.db
       .query("orchestratorConnections")
       .withIndex("by_tenant_connection", (q) => q.eq("tenantId", args.tenantId))
       .collect();
 
-    const now = Date.now();
-    const UMBRAL_ACTIVO = 60 * 1000;
+    return connections.map((conn) => {
+      const isConnected = now - conn.lastHeartbeat <= HEARTBEAT_TTL_MS;
+      const harnessType = conn.harnessType ?? conn.connectionId;
 
-    return connections
-      .filter((conn) => now - conn.lastHeartbeat < UMBRAL_ACTIVO)
-      .map((conn) => ({
+      return {
+        _id: conn._id,
         agentKey: conn.connectionId,
-        name: conn.connectionId,
-        status: conn.executing ? "working" : "idle",
+        name: harnessType,
+        status: isConnected ? "online" : "stale",
+        lastHeartbeatAt: conn.lastHeartbeat,
         meta: {
-          harnessType: conn.harnessType ?? conn.connectionId,
-          connected: true,
-          executing: conn.executing ?? false,
-          lastHeartbeatAt: new Date(conn.lastHeartbeat).toISOString(),
-          isMock: conn.isMock,
+          harnessType,
+          connected: isConnected,
+          executing: isConnected ? (conn.executing ?? false) : false,
+          lastHeartbeatAt: conn.lastHeartbeat,
+          isMock: conn.isMock ?? false,
         },
-      }));
+      };
+    });
   },
 });

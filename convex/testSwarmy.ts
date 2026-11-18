@@ -9,6 +9,11 @@ export const runTests = action({
       throw new Error("Falta CONVEX_SERVER_SECRET en el entorno de Convex.");
     }
 
+    const suffix = Date.now();
+    const runIdA = `run_test_A_${suffix}`;
+    const runIdB = `run_test_B_${suffix}`;
+    const sharedKey = `idem_shared_${suffix}`;
+
     console.log("=== INICIANDO SUITE DE TESTS W46 P0 (SEGURIDAD + AISLAMIENTO) ===");
 
     // TEST 1: Acceso anónimo / secreto inválido debe ser denegado
@@ -41,23 +46,26 @@ export const runTests = action({
       version: "v1.0",
       tenantId: "TENANT_A",
       workspaceId: "ws_A",
-      runId: "run_test_A",
+      runId: runIdA,
       eventType: "support.report.received",
       payload: { ticketId: "T-01", isMock: true },
-      idempotencyKey: "shared_idem_key_001",
+      idempotencyKey: sharedKey,
       humanApprovalRequired: false,
     });
     console.log("Tenant A (1er envío):", resA1.status);
+    if (resA1.status !== "success") {
+      throw new Error("FAIL - El primer envío de Tenant A no se insertó.");
+    }
 
     const resA2 = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
       serverSecret: validSecret,
       version: "v1.0",
       tenantId: "TENANT_A",
       workspaceId: "ws_A",
-      runId: "run_test_A",
+      runId: runIdA,
       eventType: "support.report.received",
       payload: { ticketId: "T-01", isMock: true },
-      idempotencyKey: "shared_idem_key_001",
+      idempotencyKey: sharedKey,
       humanApprovalRequired: false,
     });
     console.log("Tenant A (duplicado):", resA2.status);
@@ -71,10 +79,10 @@ export const runTests = action({
       version: "v1.0",
       tenantId: "TENANT_B",
       workspaceId: "ws_B",
-      runId: "run_test_B",
+      runId: runIdB,
       eventType: "handoff.created",
       payload: { handoffId: "h-B", isMock: true },
-      idempotencyKey: "shared_idem_key_001",
+      idempotencyKey: sharedKey,
       humanApprovalRequired: true,
     });
     console.log("Tenant B (misma llave en otro tenant):", resB1.status);
@@ -82,12 +90,12 @@ export const runTests = action({
       throw new Error("FAIL - La idempotencia de Tenant A bloqueó a Tenant B.");
     }
 
-    // TEST 3: Aislamiento de lectura (Tenant B no puede leer run_test_A)
+    // TEST 3: Aislamiento de lectura (Tenant B no puede leer runIdA)
     console.log("\n[TEST 3] Validando aislamiento de lectura cruzada...");
     const leakCheck = await ctx.runQuery(api.serverOrchestration.getEventsByRun, {
       serverSecret: validSecret,
       tenantId: "TENANT_B",
-      runId: "run_test_A",
+      runId: runIdA,
     });
     console.log("Eventos de Tenant A visibles para Tenant B:", leakCheck.length);
     if (leakCheck.length !== 0) {
@@ -97,7 +105,7 @@ export const runTests = action({
     const ownCheck = await ctx.runQuery(api.serverOrchestration.getEventsByRun, {
       serverSecret: validSecret,
       tenantId: "TENANT_A",
-      runId: "run_test_A",
+      runId: runIdA,
     });
     console.log("Eventos propios de Tenant A recuperados:", ownCheck.length);
 
