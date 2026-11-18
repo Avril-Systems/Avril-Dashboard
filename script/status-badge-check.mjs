@@ -132,3 +132,15 @@ test('eslabones: pending/done/failed', () => {
   assert.equal(stepBadge('done').tone, 'success');
   assert.equal(stepBadge('failed').tone, 'danger');
 });
+
+// ---------- backend marca status 'stale' (getActiveConnections de Alejandro) ----------
+test("status crudo 'stale' del backend se reconoce, no sale Desconocido", () => {
+  assert.equal(toUiBadge('stale').status, 'stale');
+});
+
+test("harness: agent.status 'stale' + connected:false => Stale (no 'Registrado')", () => {
+  const h = hv({ connected: false, executing: false, lastHeartbeatAt: new Date(NOW - 120000).toISOString() });
+  assert.equal(harnessBadge(h, 'stale').status, 'stale');
+  // sin el status del backend se queda como registrado sin conexión
+  assert.equal(harnessBadge(h).status, 'registered');
+});

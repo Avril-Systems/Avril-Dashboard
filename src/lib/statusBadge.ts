@@ -60,6 +60,7 @@ const RAW_TO_UI: Record<string, UiStatus> = {
   working: 'running',
   blocked: 'blocked',
   error: 'error',
+  stale: 'stale',
   // SDD / otros
   running: 'running',
   stopped: 'stopped',
@@ -99,7 +100,8 @@ export function toUiBadge(raw: string | undefined | null): Badge {
 export function harnessBadge(h: HarnessView, agentStatus?: string): Badge {
   if (!h.registered) return badgeFor('unregistered');
   if ((agentStatus ?? '').toLowerCase() === 'error') return badgeFor('error', { raw: 'error' });
-  if (h.stale) {
+  // El backend marca 'stale' cuando el latido es viejo (y entonces connected pasa a false): se respeta.
+  if (h.stale || (agentStatus ?? '').toLowerCase() === 'stale') {
     return badgeFor('stale', { hint: h.lastHeartbeatAt ? `Último heartbeat: ${h.lastHeartbeatAt}` : undefined });
   }
   if (h.executing === true) return badgeFor('running');

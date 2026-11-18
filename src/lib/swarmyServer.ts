@@ -7,7 +7,10 @@
  * deben existir en el deployment al que apunta CONVEX_URL.
  *
  * Variables (solo NOMBRES; los valores no van en el repo):
- *   CONVEX_URL (o NEXT_PUBLIC_CONVEX_URL), CONVEX_SERVER_SECRET, SWARMY_TENANT_ID, SWARMY_WORKSPACE_ID
+ *   SWARMY_CONVEX_URL, SWARMY_CONVEX_SERVER_SECRET, SWARMY_TENANT_ID, SWARMY_WORKSPACE_ID
+ * Los dos primeros son DISTINTOS de CONVEX_URL / CONVEX_SERVER_SECRET a propósito: las rutas existentes de
+ * /api/orchestration usan esas variables para tu Convex de desarrollo, y no deben chocar con el staging de Swarmy.
+ * Si no se definen, se usan como respaldo CONVEX_URL / NEXT_PUBLIC_CONVEX_URL y CONVEX_SERVER_SECRET.
  */
 import { ConvexHttpClient } from 'convex/browser';
 import { anyApi } from 'convex/server';
@@ -26,13 +29,13 @@ export class SwarmyConfigError extends Error {
 export type SwarmyConfig = { url: string; serverSecret: string; tenantId: string; workspaceId: string };
 
 export function getSwarmyConfig(): SwarmyConfig {
-  const url = process.env.CONVEX_URL ?? process.env.NEXT_PUBLIC_CONVEX_URL ?? '';
-  const serverSecret = process.env.CONVEX_SERVER_SECRET ?? '';
+  const url = process.env.SWARMY_CONVEX_URL ?? process.env.CONVEX_URL ?? process.env.NEXT_PUBLIC_CONVEX_URL ?? '';
+  const serverSecret = process.env.SWARMY_CONVEX_SERVER_SECRET ?? process.env.CONVEX_SERVER_SECRET ?? '';
   const tenantId = process.env.SWARMY_TENANT_ID ?? '';
   const workspaceId = process.env.SWARMY_WORKSPACE_ID ?? '';
   const missing: string[] = [];
-  if (!url) missing.push('CONVEX_URL');
-  if (!serverSecret) missing.push('CONVEX_SERVER_SECRET');
+  if (!url) missing.push('SWARMY_CONVEX_URL');
+  if (!serverSecret) missing.push('SWARMY_CONVEX_SERVER_SECRET');
   if (!tenantId) missing.push('SWARMY_TENANT_ID');
   if (!workspaceId) missing.push('SWARMY_WORKSPACE_ID');
   if (missing.length) throw new SwarmyConfigError(missing);
@@ -134,7 +137,16 @@ export function errorResponse(err: unknown, code: string): Response {
   }
   const raw = err instanceof Error ? err.message : 'Error desconocido';
   return NextResponse.json(
-    { ok: false, error: { code, message: redact(raw, process.env.CONVEX_SERVER_SECRET) } },
+    {
+      ok: false,
+      error: {
+        code,
+        message: redact(
+          redact(raw, process.env.SWARMY_CONVEX_SERVER_SECRET),
+          process.env.CONVEX_SERVER_SECRET
+        ),
+      },
+    },
     { status: 500 }
   );
 }
