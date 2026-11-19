@@ -135,6 +135,44 @@ export const runTests = action({
       throw new Error("FAIL - Aislamiento de conexiones incorrecto.");
     }
 
+    // TEST 5: Registro de tool.call.completed y aislamiento entre tenants
+    console.log("\n[TEST 5] Validando tool.call.completed y aislamiento...");
+    const toolRunId = `run_tool_${suffix}`;
+    const toolRes = await ctx.runMutation(api.serverOrchestration.ingestEvent, {
+      serverSecret: validSecret,
+      version: "v1.0",
+      tenantId: "TENANT_A",
+      workspaceId: "ws_A",
+      runId: toolRunId,
+      eventType: "tool.call.completed",
+      payload: {
+        extension: "github-mcp-server",
+        harnessType: "openclaw",
+        tool: "get_file_contents",
+        requestId: `req_${suffix}`,
+        httpStatus: 200,
+        responseHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        credentialRef: "GITHUB_SANDBOX_PAT_RO",
+        isMock: false,
+        sandbox: true,
+      },
+      idempotencyKey: `idem_tool_${suffix}`,
+      humanApprovalRequired: false,
+    });
+    if (toolRes.status !== "success") {
+      throw new Error("FAIL - No se registró tool.call.completed en Tenant A.");
+    }
+
+    const toolLeakCheck = await ctx.runQuery(api.serverOrchestration.getEventsByRun, {
+      serverSecret: validSecret,
+      tenantId: "TENANT_B",
+      runId: toolRunId,
+    });
+    console.log("Eventos tool.call.completed visibles para Tenant B:", toolLeakCheck.length);
+    if (toolLeakCheck.length !== 0) {
+      throw new Error("FAIL - Fuga de tool.call.completed hacia Tenant B.");
+    }
+
     console.log("\n=== TODOS LOS TESTS DE SEGURIDAD Y CONTRATO PASARON (PASS) ===");
     return { success: true };
   },

@@ -422,6 +422,7 @@ export const ingestEvent = mutation({
     workspaceId: v.string(),
     runId: v.string(),
     eventType: v.union(
+      v.literal("tool.call.completed"),
       v.literal("support.report.received"),
       v.literal("handoff.created"),
       v.literal("handoff.ack"),
@@ -436,6 +437,7 @@ export const ingestEvent = mutation({
       v.literal("agent.status"),
       v.literal("agent.paused"),
       v.literal("agent.stopped")
+      
     ),
     payload: v.any(),
     idempotencyKey: v.string(),
@@ -449,10 +451,32 @@ export const ingestEvent = mutation({
     prRef: v.optional(v.string()),
     humanApprovalRequired: v.boolean(),
   },
+
+
+  
   handler: async (ctx, args) => {
     // 1. Denegar acceso anónimo o secreto inválido
     requireServerSecret(args.serverSecret);
 
+    if (args.eventType === "tool.call.completed") {
+  const requiredFields = [
+    "extension",
+    "harnessType",
+    "tool",
+    "requestId",
+    "httpStatus",
+    "responseHash",
+    "credentialRef",
+    "isMock",
+    "sandbox",
+  ];
+  const payloadObj = (args.payload ?? {}) as Record<string, unknown>;
+  for (const field of requiredFields) {
+    if (payloadObj[field] === undefined || payloadObj[field] === null) {
+      throw new Error(`Payload inválido para tool.call.completed: falta '${field}'.`);
+    }
+  }
+}
     // 2. Verificación de Idempotencia POR TENANT
     const existingEvent = await ctx.db
       .query("orchestratorEvents")

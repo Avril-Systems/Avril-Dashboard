@@ -265,6 +265,7 @@ export default defineSchema({
     runId: v.string(),
 
     eventType: v.union(
+      v.literal("tool.call.completed"),
       v.literal("support.report.received"),
       v.literal("handoff.created"),
       v.literal("handoff.ack"),
