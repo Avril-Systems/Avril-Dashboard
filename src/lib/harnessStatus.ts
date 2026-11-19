@@ -7,7 +7,7 @@
  * Si el payload no trae el dato, el valor es null ("desconocido"), nunca false inventado.
  *
  * Contrato (meta del agente, vía upsertAgentsSnapshotServer / updateAgentStatusServer):
- *   { harnessType, connected?: boolean, executing?: boolean, lastHeartbeatAt?: ISO, isMock?: boolean }
+ *   { harnessType, connected?: boolean, executing?: boolean, lastHeartbeatAt?: ISO string | epoch ms, isMock?: boolean }
  *
  * ASUMIDO (confirmar con Alejandro): los 4 harnesses son los arneses C2.
  */
@@ -51,6 +51,15 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
+/** El backend de Swarmy manda lastHeartbeatAt como epoch en milisegundos; otros orígenes como ISO. */
+function toIso(v: unknown): string | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const d = new Date(v);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : undefined;
+  }
+  return str(v);
+}
+
 function boolOrNull(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null;
 }
@@ -85,7 +94,7 @@ export function deriveHarnesses(
     used.add(agent.agentKey);
     const meta = asRecord(agent.meta);
     const connected = boolOrNull(meta.connected);
-    const lastHeartbeatAt = str(meta.lastHeartbeatAt);
+    const lastHeartbeatAt = toIso(meta.lastHeartbeatAt);
     const hb = lastHeartbeatAt ? Date.parse(lastHeartbeatAt) : NaN;
     const stale = connected === true && Number.isFinite(hb) && nowMs - hb > staleMs;
     return {

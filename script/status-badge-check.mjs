@@ -144,3 +144,22 @@ test("harness: agent.status 'stale' + connected:false => Stale (no 'Registrado')
   // sin el status del backend se queda como registrado sin conexión
   assert.equal(harnessBadge(h).status, 'registered');
 });
+
+// ---------- latido como epoch ms (forma real de getActiveConnections de Alejandro) ----------
+test('latido numérico (epoch ms) viejo + conectado => stale y se normaliza a ISO', () => {
+  const h = hv({ connected: true, executing: true, lastHeartbeatAt: NOW - 120000 });
+  assert.equal(h.stale, true);
+  assert.equal(h.lastHeartbeatAt, new Date(NOW - 120000).toISOString());
+});
+
+test('latido numérico reciente => no stale', () => {
+  assert.equal(hv({ connected: true, lastHeartbeatAt: NOW - 5000 }).stale, false);
+});
+
+test('forma real del backend: status stale + connected:false + isMock => badge Stale, origen mock', () => {
+  const meta = { connected: false, executing: false, harnessType: 'b2b', isMock: true, lastHeartbeatAt: NOW - 90000 };
+  const h = deriveHarnesses([agent('b2b', meta)], NOW).harnesses.find((x) => x.key === 'b2b');
+  assert.equal(h.registered, true);
+  assert.equal(h.origin, 'mock');
+  assert.equal(harnessBadge(h, 'stale').status, 'stale');
+});
