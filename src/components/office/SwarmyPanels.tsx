@@ -244,7 +244,8 @@ export function AgentControlStatus({ events, agentKey }: { events: SwarmyEvent[]
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-1">
         <Pill label={`${control.command === 'pause' ? 'Pausa' : 'Stop'}: ${b.label}`} tone={b.tone} />
-        <OriginPill origin={control.origin} />
+        {/* El origen solo aplica a la CONFIRMACIÓN. Una solicitud sin confirmar no lleva etiqueta REAL: se prestaría a confusión. */}
+        {control.state === 'confirmed' && <OriginPill origin={control.origin} />}
       </div>
       {b.hint && <p className="text-[10px] text-muted-foreground">{b.hint}</p>}
     </div>

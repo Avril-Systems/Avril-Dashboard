@@ -212,7 +212,7 @@ function RunDetail({ runId }: { runId: string }) {
       }
       setMessage({
         kind: 'info',
-        text: `Solicitud de ${command} registrada para "${selectedAgent}" (${body?.status ?? 'ok'}). Aún NO está confirmada por el backend.`,
+        text: `Solicitud de ${command} registrada para "${selectedAgent}". Aún NO está confirmada por el backend.`,
       });
       refresh();
     } catch (err) {
