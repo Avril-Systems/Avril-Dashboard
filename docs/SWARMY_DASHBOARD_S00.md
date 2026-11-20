@@ -91,3 +91,24 @@ Rellenar cada fila con: URL de PR/commit, entorno y versión, runId, captura san
 
 Sin merge a `main`, sin despliegue a producción, sin VPS, Stripe, Contabo ni secretos sin autorización.
 El QA extendido de plugins/tools y la resiliencia comercial van en tarjeta separada (viernes 20).
+
+## Evidencia de cierre W46 P0 (entorno dev + datos mock)
+
+- **Rama / PR:** `feat/swarmy-s00-kevin` -> PR #4 (`8137deb`, `d13e1b4`)[cite: 12]
+- **Verificación local:** 51/51 tests en verde (`chain-logic-check.mjs`, `status-badge-check.mjs`, `swarmy-runs-check.mjs`) y `npm run typecheck` (`tsc --noEmit`) sin errores[cite: 12].
+- **RunIds sembrados en dev (`isMock: true`, `tenantId: "AVRIL_STAGING_TENANT"`):**
+  - Cadena 7 pasos: `run_mock_chain_mwo6u028`[cite: 7, 9]
+  - Pausa sin confirmar: `run_mock_pauseunconfirmed_mwo6uu95`[cite: 7, 9]
+  - Pausa confirmada: `run_mock_pauseconfirmed_mwo6uwag`[cite: 8, 9]
+  - Stop confirmado: `run_mock_killconfirmed_mwo6v3rz`[cite: 8, 9]
+- **Hallazgo de seguridad (local):** `DASHBOARD_APP_TOKEN` y `NEXT_PUBLIC_DASHBOARD_APP_TOKEN` tienen el mismo valor en `.env.local` (pendiente validar entornos desplegados y rotar/retirar variable pública con autorización de Gerry).
+
+| Punto | Estado reportado | Evidencia / Motivo |
+| :--- | :--- | :--- |
+| 1. PR #4, contrato y tests | **PARCIAL** (pendiente review) | PR abierto hacia `feat/swarmy-s00`, 51/51 tests y `typecheck` OK; falta aprobación de review de Alejandro[cite: 3, 12]. |
+| 2. UI en staging para Gerry | **PARCIAL / BLOCKED** | Pantalla `/agents/swarmy` operativa en `dev` con sesión; staging real **BLOCKED** por autorización de Gerry y secreto por canal aprobado[cite: 3]. |
+| 3. Estados y origen `real`/`mock`/`stale` | **PASS (mock/dev)** | Badges `MOCK`, `REAL`, `SIN ORIGEN` y `stale` validados y contrastados con `orchestratorConnections`[cite: 3, 9]. |
+| 4. Timeline con `runId` | **PARCIAL / BLOCKED** | Cadena de 7 pasos con `runId` (`run_mock_chain_mwo6u028`) en **PASS** (mock); `runId` real **BLOCKED** sin adaptador DeepSeek en staging[cite: 3, 7]. |
+| 5. Pause/stop, refresh y error | **PARCIAL / BLOCKED** | Flujo `Solicitado` / `Sin confirmar` / confirmados (`run_mock_pauseconfirmed_mwo6uwag`, `run_mock_killconfirmed_mwo6v3rz`) y manejo de error en **PASS** (mock); confirmación real del Engine en staging **BLOCKED**[cite: 3, 8]. |
+| 6. Historial tras refresh/reconexión | **PASS (mock/dev)** | Lectura persistida desde Convex (`orchestratorEvents` / `orchestratorConnections`) tras recarga (`F5`) y reconexión[cite: 3, 9]. |
+| 7. Build/typecheck, docs, `.env.example`, demo y review | **EN CIERRE** | `typecheck` OK, `docs/SWARMY_DASHBOARD_S00.md` y `DASHBOARD_SESSION_SECRET=` en `.env.example` (`d13e1b4`); restan capturas UI sin traducción y review/demo[cite: 3, 12]. |
