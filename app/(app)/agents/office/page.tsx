@@ -7,6 +7,7 @@ import OfficeWorld2D from '@/src/components/office/OfficeWorld2D';
 import OfficeLegend from '@/src/components/office/OfficeLegend';
 import SessionTimeline from '@/src/components/office/SessionTimeline';
 import OfficeAgentChat from '@/src/components/office/OfficeAgentChat';
+import { AgentControlStatus, HandoffChainPanel, HarnessPanel } from '@/src/components/office/SwarmyPanels';
 import { Eyebrow } from '@/components/patterns/eyebrow';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 import { SectionBackdrop } from '@/components/patterns/section-backdrop';
@@ -374,7 +375,7 @@ useEffect(() => {
       setStatusMessage(data?.error?.message || `Failed to ${command} agent`);
       return;
     }
-    setStatusMessage(`${command} command sent to ${selectedAgent.name}`);
+    setStatusMessage(`Solicitud de ${command} enviada a ${selectedAgent.name}. Esperando confirmación del backend.`);
   }
 
   return (
@@ -500,6 +501,7 @@ useEffect(() => {
                     <p className="text-sm font-heading font-semibold text-foreground">{selectedAgent.name}</p>
                     <p className="text-xs text-muted-foreground">Role · {selectedAgent.role || '—'}</p>
                     <p className="text-xs text-muted-foreground">Status · {selectedAgent.status}</p>
+                    <AgentControlStatus events={events} agentKey={selectedAgent.agentKey} />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <MarketingBrandButton
@@ -518,7 +520,9 @@ useEffect(() => {
                 </div>
               )}
             </GlassPanel>
-
+            
+           <HandoffChainPanel events={events} />
+           <HarnessPanel agents={agents} />
            {resolvedChatId && (
               <div className="shrink-0">
                 <OfficeAgentChat
