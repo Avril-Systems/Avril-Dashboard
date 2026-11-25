@@ -2,6 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
 import { deriveCompanyDisplayName, isPlaceholderChatTitle } from './lib/companyDisplayName';
+import { getActivityDef, isActivityForHarness, isHarnessType } from './lib/harnessActivities';
 
 
 const SERVER_SECRET_ENV = 'CONVEX_SERVER_SECRET';
@@ -436,8 +437,13 @@ export const ingestEvent = mutation({
       v.literal("agent.command.sent"),
       v.literal("agent.status"),
       v.literal("agent.paused"),
-      v.literal("agent.stopped")
-      
+      v.literal("agent.stopped"),
+      v.literal("activity.assigned"),
+      v.literal("activity.started"),
+      v.literal("activity.completed"),
+      v.literal("activity.failed"),
+      v.literal("activity.blocked"),
+      v.literal("prospecto.verificado")
     ),
     payload: v.any(),
     idempotencyKey: v.string(),
@@ -647,5 +653,346 @@ export const getActiveConnections = query({
         },
       };
     });
+  },
+});
+// ============================================================================
+// Actividades por arnés (Dashboard -> cola durable -> worker real -> resultado)
+// ============================================================================
+
+const harnessActivityStatusValidator = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("completed"),
+  v.literal("failed"),
+  v.literal("blocked"),
+  v.literal("cancelled")
+);
+
+const MAX_ACTIVITY_INPUT_BYTES = 32_000;
+const MAX_ACTIVITY_RESULT_BYTES = 300_000;
+
+function requireSafeId(value: string, field: string) {
+  if (!value || value.length > 128 || !/^[A-Za-z0-9_.:-]+$/.test(value)) {
+    throw new Error(`Identificador inválido para ${field}.`);
+  }
+}
+
+function activityEventId(activityId: string, suffix: string) {
+  return `activity_${activityId}_${suffix}`;
+}
+
+function resultSummaryOf(result: unknown) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return undefined;
+  return (result as Record<string, unknown>).summary;
+}
+
+/** Devuelve solo lo que la UI necesita; el resultado completo se pide aparte. */
+function publicActivity(
+  row: {
+    activityId: string;
+    runId: string;
+    harnessType: string;
+    activity: string;
+    title: string;
+    input?: unknown;
+    status: string;
+    result?: unknown;
+    error?: string;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    startedAt?: string;
+    finishedAt?: string;
+  },
+  includeResult: boolean
+) {
+  const result = row.result;
+  return {
+    activityId: row.activityId,
+    runId: row.runId,
+    harnessType: row.harnessType,
+    activity: row.activity,
+    title: row.title,
+    input: row.input,
+    status: row.status,
+    summary: resultSummaryOf(result),
+    ...(includeResult
+      ? {
+          result:
+            result && typeof result === "object" && !Array.isArray(result)
+              ? result
+              : result ?? undefined,
+        }
+      : {}),
+    error: row.error,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+  };
+}
+
+/** Asigna una actividad a un arnés. Crea el run y el evento activity.assigned en la misma mutación. */
+export const assignHarnessActivity = mutation({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    workspaceId: v.string(),
+    harnessType: v.string(),
+    activity: v.string(),
+    title: v.optional(v.string()),
+    input: v.optional(v.any()),
+    createdBy: v.optional(v.string()),
+    runId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    requireSafeId(args.workspaceId, "workspaceId");
+    if (!isHarnessType(args.harnessType) || !isActivityForHarness(args.harnessType, args.activity)) {
+      throw new Error("Arnés o actividad no válidos.");
+    }
+
+    const inputJson = JSON.stringify(args.input ?? {});
+    if (inputJson && inputJson.length > MAX_ACTIVITY_INPUT_BYTES) {
+      throw new Error("El input de la actividad es demasiado grande.");
+    }
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const activityId = `act_${now.toString(36)}_${suffix}`;
+    const runId = args.runId?.trim() || `run_${args.harnessType}_${now.toString(36)}_${suffix}`;
+    requireSafeId(runId, "runId");
+
+    const def = getActivityDef(args.harnessType);
+    const title = (args.title?.trim() || def.defaultTitle).slice(0, 120);
+    const createdBy = (args.createdBy?.trim() || "dashboard").slice(0, 80);
+
+    await ctx.db.insert("harnessActivities", {
+      tenantId: args.tenantId,
+      workspaceId: args.workspaceId,
+      activityId,
+      runId,
+      harnessType: args.harnessType,
+      activity: args.activity,
+      title,
+      input: args.input ?? {},
+      status: "queued",
+      createdBy,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+
+    await ctx.db.insert("orchestratorEvents", {
+      version: "v1.0",
+      tenantId: args.tenantId,
+      workspaceId: args.workspaceId,
+      runId,
+      eventType: "activity.assigned",
+      payload: {
+        activityId,
+        harnessType: args.harnessType,
+        activity: args.activity,
+        title,
+        input: args.input ?? {},
+        isMock: false,
+      },
+      ack: true,
+      idempotencyKey: activityEventId(activityId, "assigned"),
+      timestamp: now,
+      humanApprovalRequired: false,
+    });
+
+    return { activityId, runId, status: "queued" as const };
+  },
+});
+
+/**
+ * Reclama la siguiente actividad en cola para un arnés. Es la operación atómica que usa el worker:
+ * si dos workers compiten, Convex serializa y solo uno obtiene `claimed`.
+ */
+export const claimNextHarnessActivity = mutation({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    harnessType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    if (!isHarnessType(args.harnessType)) throw new Error("Arnés no válido.");
+
+    const next = await ctx.db
+      .query("harnessActivities")
+      .withIndex("by_tenant_harness_status", (q) =>
+        q.eq("tenantId", args.tenantId).eq("harnessType", args.harnessType).eq("status", "queued")
+      )
+      .order("asc")
+      .first();
+    if (!next) return null;
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    await ctx.db.patch(next._id, {
+      status: "running",
+      startedAt: nowIso,
+      updatedAt: nowIso,
+    });
+
+    await ctx.db.insert("orchestratorEvents", {
+      version: "v1.0",
+      tenantId: next.tenantId,
+      workspaceId: next.workspaceId,
+      runId: next.runId,
+      eventType: "activity.started",
+      payload: {
+        activityId: next.activityId,
+        harnessType: next.harnessType,
+        activity: next.activity,
+        isMock: false,
+      },
+      ack: true,
+      idempotencyKey: activityEventId(next.activityId, "started"),
+      timestamp: now,
+      humanApprovalRequired: false,
+    });
+
+    return publicActivity({ ...next, status: "running", startedAt: nowIso, updatedAt: nowIso }, false);
+  },
+});
+
+/** Cierra una actividad reclamada. `blocked` se usa cuando falta un recurso/adaptador, nunca como éxito. */
+export const completeHarnessActivity = mutation({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    activityId: v.string(),
+    status: v.union(v.literal("completed"), v.literal("failed"), v.literal("blocked")),
+    result: v.optional(v.any()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    requireSafeId(args.activityId, "activityId");
+
+    const row = await ctx.db
+      .query("harnessActivities")
+      .withIndex("by_tenant_activity", (q) => q.eq("tenantId", args.tenantId).eq("activityId", args.activityId))
+      .first();
+    if (!row) throw new Error("Actividad no encontrada.");
+    if (row.status !== "running") {
+      throw new Error(`La actividad está en estado '${row.status}', no se puede cerrar.`);
+    }
+
+    const resultJson = JSON.stringify(args.result ?? null);
+    if (resultJson && resultJson.length > MAX_ACTIVITY_RESULT_BYTES) {
+      throw new Error("El resultado de la actividad es demasiado grande.");
+    }
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const error = args.error?.trim() ? args.error.trim().slice(0, 2000) : undefined;
+
+    await ctx.db.patch(row._id, {
+      status: args.status,
+      ...(args.result !== undefined ? { result: args.result } : {}),
+      ...(error ? { error } : {}),
+      updatedAt: nowIso,
+      finishedAt: nowIso,
+    });
+
+    const eventType =
+      args.status === "completed" ? "activity.completed" : args.status === "blocked" ? "activity.blocked" : "activity.failed";
+
+    await ctx.db.insert("orchestratorEvents", {
+      version: "v1.0",
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      runId: row.runId,
+      eventType,
+      payload: {
+        activityId: row.activityId,
+        harnessType: row.harnessType,
+        activity: row.activity,
+        status: args.status,
+        summary: resultSummaryOf(args.result),
+        error,
+        isMock: false,
+      },
+      ack: true,
+      idempotencyKey: activityEventId(row.activityId, args.status),
+      timestamp: now,
+      humanApprovalRequired: false,
+    });
+
+    return { ok: true as const, activityId: row.activityId, status: args.status };
+  },
+});
+
+/** Lista actividades del tenant. Por defecto sin `result` completo para no inflar el sondeo. */
+export const listHarnessActivities = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    runId: v.optional(v.string()),
+    harnessType: v.optional(v.string()),
+    status: v.optional(harnessActivityStatusValidator),
+    includeResult: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    const take = Math.max(1, Math.min(args.limit ?? 50, 200));
+
+    let rows;
+    if (args.runId) {
+      requireSafeId(args.runId, "runId");
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_run", (q) => q.eq("tenantId", args.tenantId).eq("runId", args.runId as string))
+        .collect();
+    } else if (args.status) {
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_status", (q) => q.eq("tenantId", args.tenantId).eq("status", args.status as "queued"))
+        .order("desc")
+        .take(take);
+    } else {
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_createdAt", (q) => q.eq("tenantId", args.tenantId))
+        .order("desc")
+        .take(take);
+    }
+
+    return rows
+      .filter((row) => (args.harnessType ? row.harnessType === args.harnessType : true))
+      .filter((row) => (args.status ? row.status === args.status : true))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+      .slice(0, take)
+      .map((row) => publicActivity(row, args.includeResult === true));
+  },
+});
+
+/** Resultado completo de una actividad (para el detalle del run). */
+export const getHarnessActivity = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    activityId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    requireSafeId(args.activityId, "activityId");
+    const row = await ctx.db
+      .query("harnessActivities")
+      .withIndex("by_tenant_activity", (q) => q.eq("tenantId", args.tenantId).eq("activityId", args.activityId))
+      .first();
+    return row ? publicActivity(row, true) : null;
   },
 });

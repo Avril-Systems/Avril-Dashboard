@@ -17,9 +17,18 @@ import { avrilTypography } from '@/lib/avril-tokens';
 import { cn } from '@/lib/utils';
 import SessionTimeline from '@/src/components/office/SessionTimeline';
 import { AgentControlStatus, HandoffChainPanel, HarnessPanel, OriginPill, Pill } from '@/src/components/office/SwarmyPanels';
+import { ActivityAssignPanel, ActivityResultsPanel } from '@/src/components/office/HarnessActivityPanel';
+import type { HarnessActivityItem } from '@/src/components/office/HarnessActivityPanel';
 import type { SwarmyEvent } from '@/src/components/office/SwarmyPanels';
 import type { AgentRow } from '@/src/lib/harnessStatus';
 import type { RunSummary } from '@/src/lib/swarmyRuns';
+
+const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
+
+/** Mismo fallback legacy que Agent Office: sesión si existe, token de dashboard en demo/dev. */
+function authHeaders(): Record<string, string> {
+  return DASHBOARD_TOKEN ? { 'x-dashboard-token': DASHBOARD_TOKEN } : {};
+}
 
 type ApiProblem = { code: string; message: string; missing?: string[] };
 
@@ -51,7 +60,7 @@ function usePolling<T>(url: string | null, intervalMs: number): PollState<T> {
     let active = true;
     async function load() {
       try {
-        const res = await fetch(url as string, { cache: 'no-store', credentials: 'include' });
+        const res = await fetch(url as string, { cache: 'no-store', credentials: 'include', headers: authHeaders() });
         const body = await res.json().catch(() => ({}));
         if (!active) return;
         if (!res.ok || body?.ok === false) {
@@ -163,13 +172,13 @@ function RunsList({ activeRunId, onSelect }: { activeRunId: string; onSelect: (r
   );
 }
 
-type RunPayload = { runId: string; events: SwarmyEvent[]; agents: AgentRow[] };
+type RunPayload = { runId: string; events: SwarmyEvent[]; agents: AgentRow[]; activities: HarnessActivityItem[] };
 
 function RunDetail({ runId }: { runId: string }) {
   const url = `/api/orchestration/swarmy/run?runId=${encodeURIComponent(runId)}`;
   const { data, problem, lastOkAt, loading, refresh } = usePolling<RunPayload>(url, 2000);
   const events = data?.events ?? [];
-  const agents = data?.agents ?? [];
+  const agents = useMemo(() => data?.agents ?? [], [data]);
 
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -189,6 +198,21 @@ function RunDetail({ runId }: { runId: string }) {
   }, [agents, selectedAgent]);
 
   const agentKeys = useMemo(() => agents.map((a) => a.agentKey), [agents]);
+  const activities = data?.activities ?? [];
+  const hasHandoffEvents = events.some((e) =>
+    [
+      'support.report.received',
+      'handoff.created',
+      'handoff.ack',
+      'handoff.acknowledged',
+      'diagnosis.ready',
+      'patch.proposed',
+      'approval.decided',
+      'run.result',
+      'task.completed',
+      'task.failed',
+    ].includes(e.type)
+  );
 
   async function send(command: 'pause' | 'kill') {
     if (!selectedAgent || busy) return;
@@ -199,7 +223,7 @@ function RunDetail({ runId }: { runId: string }) {
       const res = await fetch('/api/orchestration/swarmy/control', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ runId, agentKey: selectedAgent, command }),
       });
       const body = await res.json().catch(() => ({}));
@@ -237,8 +261,20 @@ function RunDetail({ runId }: { runId: string }) {
         {problem && <ProblemBanner problem={problem} hasData={Boolean(data)} />}
       </GlassPanel>
 
+      <ActivityResultsPanel activities={activities} />
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <HandoffChainPanel events={events} fallbackRunId={runId} />
+        {hasHandoffEvents || activities.length === 0 ? (
+          <HandoffChainPanel events={events} fallbackRunId={runId} />
+        ) : (
+          <GlassPanel className="space-y-2 p-4">
+            <h4 className={cn(avrilTypography.card, 'text-sm')}>Cadena de handoff</h4>
+            <p className="text-xs text-muted-foreground">
+              Este run es una actividad de arnés, no una cadena de handoff. Los 7 pasos solo se muestran cuando existen
+              eventos reales de soporte/handoff; aquí no se rellenan con estados inventados.
+            </p>
+          </GlassPanel>
+        )}
         <div className="flex min-w-0 flex-col gap-4">
           <HarnessPanel agents={agents} />
 
@@ -316,9 +352,11 @@ function SwarmyConsole() {
         <Eyebrow>Swarmy · S00</Eyebrow>
         <h1 className={cn(avrilTypography.display, 'text-2xl')}>Runs y agentes</h1>
         <p className="text-xs text-muted-foreground">
-          Datos leídos de Convex vía servidor. Los eventos MOCK se marcan siempre; un estado solo cambia cuando el backend lo confirma.
+          Datos leídos de Convex vía servidor. Asigna una actividad, ejecútala con el worker y consulta aquí el resultado real.
+          Los eventos MOCK se marcan siempre; un estado solo cambia cuando el backend lo confirma.
         </p>
       </div>
+      <ActivityAssignPanel onAssigned={(runId) => router.push(`/agents/swarmy?runId=${encodeURIComponent(runId)}`)} />
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <RunsList activeRunId={runId} onSelect={(id) => router.push(`/agents/swarmy?runId=${encodeURIComponent(id)}`)} />
         {runId ? (

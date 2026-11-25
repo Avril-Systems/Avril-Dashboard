@@ -12,3 +12,15 @@
 2. Configura el secreto del servidor en Convex (nunca lo subas al repositorio):
    ```bash
    npx convex env set CONVEX_SERVER_SECRET "<tu-secreto-seguro>"
+## 3. Actividades por arnés (cola durable)
+- **Tabla:** `harnessActivities` con `activityId`, `runId`, `harnessType`, `activity`, `input`, `status`
+  (`queued/running/completed/failed/blocked/cancelled`) y `result`.
+- **Mutaciones:** `assignHarnessActivity`, `claimNextHarnessActivity` (claim atómico por tenant+arnés),
+  `completeHarnessActivity`.
+- **Consultas:** `listHarnessActivities` (con `includeResult` opcional), `getHarnessActivity`.
+- **Eventos:** `activity.assigned`, `activity.started`, `activity.completed`, `activity.failed`,
+  `activity.blocked` y `prospecto.verificado`.
+- **Ejecución:** `script/harness-worker.mjs` (proceso aparte) reclama y ejecuta con
+  `script/harness-adapters.mjs`. Sin worker, la actividad queda `queued`.
+
+Contrato, variables y evidencia real: [`SWARMY_ACTIVITIES.md`](./SWARMY_ACTIVITIES.md).

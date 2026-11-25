@@ -4,8 +4,9 @@ Responsable: Kevin Muñoz · Rama: `feat/swarmy-s00-kevin` → PR #4 hacia `feat
 SDD: `docs/Specs/AVRIL-SWARMY-S00.md`
 
 Qué es: una consola para ver, desde el Dashboard, los runs de Swarmy (workspace → run → pasos y agentes),
-con estados, origen (mock/real), cadena de handoff y control pause/stop. **No ejecuta nada por sí misma**:
-solo lee eventos de Convex y registra solicitudes de control.
+con estados, origen (mock/real), cadena de handoff y control pause/stop. **No ejecuta procesos por sí misma**:
+encola actividades, lee eventos de Convex y registra solicitudes de control; la ejecución la hace un worker
+aparte (`script/harness-worker.mjs`).
 
 > Regla de la tarjeta: ninguna UI mock cuenta como ejecución real. Lo que no se pudo verificar está marcado
 > como PENDIENTE o BLOCKED en la sección "Estado de la evidencia".
@@ -23,9 +24,13 @@ solo lee eventos de Convex y registra solicitudes de control.
 | Rutas API | `app/api/orchestration/swarmy/{runs,run,control}/route.ts` | Lista de runs, detalle de un run, solicitud de pause/kill. |
 | Paneles | `src/components/office/SwarmyPanels.tsx` | Cadena de handoff, harnesses, estado de control. Solo presentación. |
 | Pantalla | `app/(app)/agents/swarmy/page.tsx` | Consola. URL: `/agents/swarmy?runId=<id>` |
+| Actividades (asignar/consultar) | `src/components/office/HarnessActivityPanel.tsx` + `app/api/orchestration/harness/activities/route.ts` | Elige arnés, encola una actividad y muestra el resultado real. Ver `docs/SWARMY_ACTIVITIES.md`. |
+| Ejecución real | `script/harness-worker.mjs` + `script/harness-adapters.mjs` | Worker aparte: heartbeat, claim atómico y adaptadores de prospección/B2B/marketing/soporte. |
+| Cola durable | `convex/schema.ts` (`harnessActivities`) + `convex/lib/harnessActivities.ts` | Actividades, estados y catálogo compartido con la UI. |
 
-"Tareas" en esta vista = pasos de la cadena de handoff y eventos del run. "Agentes" = harnesses (conexiones con latido).
-La tabla `tasks` de Convex no tiene `runId`, por eso no se mezcla.
+"Tareas" en esta vista = actividades asignadas (`harnessActivities`) y pasos de la cadena de handoff. "Agentes" =
+harnesses (conexiones con latido). La tabla `tasks` de Convex no tiene `runId`, por eso no se mezcla con las
+actividades de Swarmy.
 
 ## 2. Cómo funciona
 
@@ -49,6 +54,13 @@ La tabla `tasks` de Convex no tiene `runId`, por eso no se mezcla.
 
 Se usan nombres propios para no chocar con `CONVEX_URL` / `CONVEX_SERVER_SECRET`, que usan las rutas existentes de `/api/orchestration`
 contra el Convex de desarrollo. Si falta alguna, las rutas responden `503 CONFIG_MISSING` y la pantalla muestra **BLOCKED** con los nombres que faltan.
+
+### Actividades de los cuatro arneses
+
+La consola permite asignar una actividad a soporte, B2B, prospección o marketing.
+La actividad se encola en Convex y la ejecuta un worker real (`npm run harness:worker`);
+sin worker queda en cola y la UI lo muestra. El detalle completo, contrato y
+evidencia están en [`SWARMY_ACTIVITIES.md`](./SWARMY_ACTIVITIES.md).
 
 ## 4. Cómo correr y probar
 

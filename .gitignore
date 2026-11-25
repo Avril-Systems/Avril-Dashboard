@@ -9,3 +9,7 @@ cache
 out
 broadcast
 .env*
+
+# Local harness artifacts / editor state
+.harness-runs/
+.cursor/

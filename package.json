@@ -11,7 +11,11 @@
     "test:happy-path": "node ./script/happy-path-check.mjs",
     "diagnose:openclaw": "node ./script/openclaw-diagnostic.mjs",
     "openclaw:bridge": "node bridge/openclaw-bridge.mjs",
-    "startup-agent:generate": "node ./script/startup-agent-generator.mjs"
+    "startup-agent:generate": "node ./script/startup-agent-generator.mjs",
+    "harness:worker": "node ./script/harness-worker.mjs",
+    "harness:worker:once": "node ./script/harness-worker.mjs --once",
+    "harness:check": "node --test script/harness-activities-check.mjs",
+    "swarmy:check": "node --test script/chain-logic-check.mjs script/status-badge-check.mjs script/swarmy-runs-check.mjs script/harness-activities-check.mjs"
   },
   "dependencies": {
     "@human.tech/passport-embed": "^0.3.4",

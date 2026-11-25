@@ -279,7 +279,15 @@ export default defineSchema({
       v.literal("agent.command.sent"),
       v.literal("agent.status"),
       v.literal("agent.paused"),
-      v.literal("agent.stopped")
+      v.literal("agent.stopped"),
+      // Actividades asignadas desde el Dashboard a los 4 arneses.
+      v.literal("activity.assigned"),
+      v.literal("activity.started"),
+      v.literal("activity.completed"),
+      v.literal("activity.failed"),
+      v.literal("activity.blocked"),
+      // Resultado real del arnés de prospección (reutiliza el trabajo previo).
+      v.literal("prospecto.verificado")
     ),
 
     payload: v.any(),
@@ -314,4 +322,37 @@ export default defineSchema({
     isMock: v.optional(v.boolean()),
     lastHeartbeat: v.number(),
   }).index("by_tenant_connection", ["tenantId", "connectionId"]),
+
+  // Actividades asignadas desde el Dashboard y ejecutadas por el worker de arneses.
+  // Es la cola durable: una actividad solo pasa a running cuando un worker la reclama.
+  harnessActivities: defineTable({
+    tenantId: v.string(),
+    workspaceId: v.string(),
+    activityId: v.string(),
+    runId: v.string(),
+    harnessType: v.string(), // 'support' | 'b2b' | 'prospecting' | 'marketing'
+    activity: v.string(), // clave del catálogo (convex/lib/harnessActivities.ts)
+    title: v.string(),
+    input: v.optional(v.any()),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("blocked"),
+      v.literal("cancelled")
+    ),
+    result: v.optional(v.any()),
+    error: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    startedAt: v.optional(v.string()),
+    finishedAt: v.optional(v.string()),
+  })
+    .index("by_tenant_activity", ["tenantId", "activityId"])
+    .index("by_tenant_status", ["tenantId", "status"])
+    .index("by_tenant_harness_status", ["tenantId", "harnessType", "status"])
+    .index("by_tenant_run", ["tenantId", "runId"])
+    .index("by_tenant_createdAt", ["tenantId", "createdAt"]),
 });

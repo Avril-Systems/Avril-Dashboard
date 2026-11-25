@@ -150,3 +150,70 @@ export function errorResponse(err: unknown, code: string): Response {
     { status: 500 }
   );
 }
+
+// ---------------------------------------------------------------------------
+// Actividades por arnés (cola durable en Convex, ejecutadas por el worker)
+// ---------------------------------------------------------------------------
+
+export type HarnessActivityRow = {
+  activityId: string;
+  runId: string;
+  harnessType: string;
+  activity: string;
+  title: string;
+  input?: unknown;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled';
+  summary?: unknown;
+  result?: unknown;
+  error?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+};
+
+export async function listTenantActivities(input: {
+  runId?: string;
+  harnessType?: string;
+  status?: HarnessActivityRow['status'];
+  includeResult?: boolean;
+  limit?: number;
+} = {}): Promise<HarnessActivityRow[]> {
+  const c = getSwarmyConfig();
+  const client = new ConvexHttpClient(c.url);
+  return (await client.query(anyApi.serverOrchestration.listHarnessActivities, {
+    serverSecret: c.serverSecret,
+    tenantId: c.tenantId,
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.harnessType ? { harnessType: input.harnessType } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    includeResult: input.includeResult === true,
+    limit: input.limit ?? 50,
+  })) as HarnessActivityRow[];
+}
+
+export async function listRunActivities(runId: string): Promise<HarnessActivityRow[]> {
+  return listTenantActivities({ runId, includeResult: true, limit: 50 });
+}
+
+export async function assignHarnessActivity(input: {
+  harnessType: string;
+  activity: string;
+  title?: string;
+  input: Record<string, unknown>;
+  createdBy?: string;
+}): Promise<{ activityId: string; runId: string; status: 'queued' }> {
+  const c = getSwarmyConfig();
+  const client = new ConvexHttpClient(c.url);
+  return (await client.mutation(anyApi.serverOrchestration.assignHarnessActivity, {
+    serverSecret: c.serverSecret,
+    tenantId: c.tenantId,
+    workspaceId: c.workspaceId,
+    harnessType: input.harnessType,
+    activity: input.activity,
+    title: input.title,
+    input: input.input,
+    createdBy: input.createdBy ?? 'dashboard',
+  })) as { activityId: string; runId: string; status: 'queued' };
+}
