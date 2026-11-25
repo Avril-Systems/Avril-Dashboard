@@ -255,5 +255,63 @@ export default defineSchema({
     decisionAt: v.optional(v.string()),
     createdAt: v.string(),
   }).index('by_org_status', ['organizationId', 'status']),
-  auditLogs: defineTable({ organizationId: v.id('organizations'), actorUserId: v.optional(v.id('users')), action: v.string(), resourceType: v.string(), resourceId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.string() }).index('by_org_time', ['organizationId', 'createdAt'])
+  auditLogs: defineTable({ organizationId: v.id('organizations'), actorUserId: v.optional(v.id('users')), action: v.string(), resourceType: v.string(), resourceId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.string() }).index('by_org_time', ['organizationId', 'createdAt']),
+
+/// Contrato versionado de eventos del orquestador (S00 / W46) - Alejandro y Kevin
+  orchestratorEvents: defineTable({
+    version: v.string(), // ej. "v1.0"
+    tenantId: v.string(), // Aislamiento estricto por cliente
+    workspaceId: v.string(),
+    runId: v.string(),
+
+    eventType: v.union(
+      v.literal("tool.call.completed"),
+      v.literal("support.report.received"),
+      v.literal("handoff.created"),
+      v.literal("handoff.ack"),
+      v.literal("diagnosis.ready"),
+      v.literal("patch.proposed"),
+      v.literal("approval.decided"),
+      v.literal("run.result"),
+      v.literal("run.pause"),
+      v.literal("run.pause.confirmed"),
+      v.literal("error.reported"),
+      v.literal("agent.command.sent"),
+      v.literal("agent.status"),
+      v.literal("agent.paused"),
+      v.literal("agent.stopped")
+    ),
+
+    payload: v.any(),
+
+    // Trazabilidad y resiliencia
+    ack: v.boolean(),
+    idempotencyKey: v.string(),
+    timestamp: v.number(),
+
+    // Soporte DeepSeek y trazabilidad de código
+    repository: v.optional(v.string()),
+    branch: v.optional(v.string()),
+    allowedRoutes: v.optional(v.array(v.string())),
+    patchRef: v.optional(v.string()),
+    testResultRef: v.optional(v.string()),
+    prRef: v.optional(v.string()),
+
+    // Validaciones Human-in-the-loop
+    humanApprovalRequired: v.boolean(),
+    humanApproved: v.optional(v.boolean()),
+  })
+    .index("by_tenant_run", ["tenantId", "runId"])
+    .index("by_tenant_time", ["tenantId", "timestamp"])
+    .index("by_tenant_idempotency", ["tenantId", "idempotencyKey"]),
+
+  // Registro de conexiones activas sin procesos permanentes (Heartbeats por tenant)
+  orchestratorConnections: defineTable({
+    connectionId: v.string(),
+    tenantId: v.string(),
+    harnessType: v.optional(v.string()), // 'support' | 'b2b' | 'prospecting' | 'marketing'
+    executing: v.optional(v.boolean()),
+    isMock: v.optional(v.boolean()),
+    lastHeartbeat: v.number(),
+  }).index("by_tenant_connection", ["tenantId", "connectionId"]),
 });

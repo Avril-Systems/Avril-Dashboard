@@ -27,6 +27,7 @@ import type * as serverFounder from "../serverFounder.js";
 import type * as serverOrchestration from "../serverOrchestration.js";
 import type * as serverUsers from "../serverUsers.js";
 import type * as summarize from "../summarize.js";
+import type * as testSwarmy from "../testSwarmy.js";
 
 import type {
   ApiFromModules,
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   serverOrchestration: typeof serverOrchestration;
   serverUsers: typeof serverUsers;
   summarize: typeof summarize;
+  testSwarmy: typeof testSwarmy;
 }>;
 
 /**
