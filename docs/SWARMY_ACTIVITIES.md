@@ -167,7 +167,8 @@ workspace `ws_staging_01`. **No se tocó staging ni producción.**
 | B2B original (API) | `run_b2b_mwwsphi2_8gq3fe` | 10 solicitudes: 4 listas para validar, 4 con datos faltantes, 1 fuera de alcance, 1 duplicada; `draftsNotSent: true`. |
 | B2B original (UI) | `run_b2b_mwwssmw0_ztma4q` | Asignada desde el formulario del Dashboard y ejecutada por el worker con el mismo resultado (10/4/4/1/1). |
 | Soporte original | `run_support_mwwspamo_7dqn7g` | 1 ticket (`paid_not_ready`, severidad alta), escalado, `handoffSummary` y `devHandoff` generados; secretos/PII enmascarados por el arnés. |
-| Marketing original (UI) | `run_marketing_mwwt0ilu_609p9p` | 1 pieza completada, 27.8 s, 7,985 tokens, material Markdown + reporte; `requiresHumanReview: true`. Asignada desde el formulario del Dashboard; `MODELO_LLM=nvidia/nemotron-3.5-lightning-30b-a3b`. |
+| Marketing original (UI, 1 pieza) | `run_marketing_mwwt0ilu_609p9p` | 1 pieza completada, 27.8 s, 7,985 tokens, material Markdown + reporte; `requiresHumanReview: true`. Asignada desde el formulario del Dashboard; `MODELO_LLM=nvidia/nemotron-3.5-lightning-30b-a3b`. |
+| Marketing original (default, 3 piezas) | `run_marketing_mwwt2b18_4ges70` | 3/3 piezas completadas, 3 materiales, 104.4 s, 22,689 tokens; se usó el `briefing_ejemplo.json` original al dejar el briefing vacío. |
 
 Todas las actividades anteriores quedaron en estado `completed` y sus resultados se leyeron
 desde `/api/orchestration/swarmy/run` (misma ruta que usa la consola). B2B y marketing se
