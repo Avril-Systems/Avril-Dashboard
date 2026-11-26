@@ -167,12 +167,14 @@ workspace `ws_staging_01`. **No se tocó staging ni producción.**
 | B2B original (API) | `run_b2b_mwwsphi2_8gq3fe` | 10 solicitudes: 4 listas para validar, 4 con datos faltantes, 1 fuera de alcance, 1 duplicada; `draftsNotSent: true`. |
 | B2B original (UI) | `run_b2b_mwwssmw0_ztma4q` | Asignada desde el formulario del Dashboard y ejecutada por el worker con el mismo resultado (10/4/4/1/1). |
 | Soporte original | `run_support_mwwspamo_7dqn7g` | 1 ticket (`paid_not_ready`, severidad alta), escalado, `handoffSummary` y `devHandoff` generados; secretos/PII enmascarados por el arnés. |
-| Marketing original | `run_marketing_mwwspn74_ox5mka` | 1 pieza completada, 29.4 s, 8,004 tokens, material Markdown + reporte; `requiresHumanReview: true`. Se usó `MODELO_LLM=nvidia/nemotron-3.5-lightning-30b-a3b`. |
+| Marketing original (UI) | `run_marketing_mwwt0ilu_609p9p` | 1 pieza completada, 27.8 s, 7,985 tokens, material Markdown + reporte; `requiresHumanReview: true`. Asignada desde el formulario del Dashboard; `MODELO_LLM=nvidia/nemotron-3.5-lightning-30b-a3b`. |
 
 Todas las actividades anteriores quedaron en estado `completed` y sus resultados se leyeron
-desde `/api/orchestration/swarmy/run` (misma ruta que usa la consola). La actividad B2B
-original de la fila UI se creó haciendo clic en **B2B → Captación B2B original → Asignar
-actividad** en `/agents/swarmy`, no por API directa.
+desde `/api/orchestration/swarmy/run` (misma ruta que usa la consola). B2B y marketing se
+asignaron haciendo clic en **B2B → Captación B2B original → Asignar actividad** y
+**Marketing → Campaña de marketing original → Asignar actividad**; prospección y soporte
+usaron el mismo endpoint que consume el formulario y sus resultados se verificaron en la
+consola. No se usó una vía de ejecución distinta para ninguna de las cuatro.
 
 El arnés de marketing necesita `NVIDIA_API_KEY` en el entorno del worker; la llave no se
 guardó en el repositorio ni en `harnessActivities`. Los arneses B2B/soporte/prospección no
