@@ -14,8 +14,8 @@ import { useMemo, useState } from 'react';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 import { avrilTypography } from '@/lib/avril-tokens';
 import { cn } from '@/lib/utils';
-import { HARNESS_CATALOG, HARNESS_TYPES, isHarnessType } from '@/convex/lib/harnessActivities';
-import type { HarnessType } from '@/convex/lib/harnessActivities';
+import { HARNESS_CATALOG, HARNESS_TYPES, getActivityDef, isHarnessType } from '@/convex/lib/harnessActivities';
+import type { ActivityDef, HarnessType } from '@/convex/lib/harnessActivities';
 import { toUiBadge } from '@/src/lib/statusBadge';
 import { OriginPill, Pill } from '@/src/components/office/SwarmyPanels';
 import type { Tone } from '@/src/lib/statusBadge';
@@ -78,6 +78,30 @@ const SUMMARY_LABELS: Record<string, string> = {
   groups: 'Grupos',
   latestAt: 'Último',
   scannedEvents: 'Eventos leídos',
+  mode: 'Modo',
+  requests: 'Solicitudes',
+  ready: 'Listas para validar',
+  missingData: 'Faltan datos',
+  outOfScope: 'Fuera de alcance',
+  duplicates: 'Duplicadas',
+  draftsNotSent: 'Borradores sin enviar',
+  tickets: 'Tickets',
+  valid: 'Válidos',
+  errors: 'Errores',
+  escalated: 'Escalados',
+  faqResolved: 'Resueltos por FAQ',
+  critical: 'Críticos',
+  high: 'Alta severidad',
+  pieces: 'Piezas',
+  completed: 'Completadas',
+  failed: 'Fallidas',
+  materials: 'Materiales',
+  durationSeconds: 'Duración (s)',
+  tokens: 'Tokens',
+  model: 'Modelo',
+  requiresHumanReview: 'Revisión humana',
+  historySize: 'Histórico',
+  durationMs: 'Duración (ms)',
 };
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -98,30 +122,42 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-function defaultsFor(harness: HarnessType): Record<string, string> {
+function defaultsFor(harness: HarnessType, activityKey: string): Record<string, string> {
   const values: Record<string, string> = {};
-  for (const field of HARNESS_CATALOG[harness].activity.inputFields) {
+  for (const field of getActivityDef(harness, activityKey).inputFields) {
     values[field.key] = field.defaultValue !== undefined ? String(field.defaultValue) : '';
   }
   return values;
 }
 
+const DEFAULT_HARNESS: HarnessType = 'prospecting';
+
 export function ActivityAssignPanel({ onAssigned }: { onAssigned?: (runId: string, activityId: string) => void }) {
-  const [harness, setHarness] = useState<HarnessType>('prospecting');
-  const [values, setValues] = useState<Record<string, string>>(() => defaultsFor('prospecting'));
+  const [harness, setHarness] = useState<HarnessType>(DEFAULT_HARNESS);
+  const [activityKey, setActivityKey] = useState<string>(() => getActivityDef(DEFAULT_HARNESS).key);
+  const [values, setValues] = useState<Record<string, string>>(() => defaultsFor(DEFAULT_HARNESS, getActivityDef(DEFAULT_HARNESS).key));
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [created, setCreated] = useState<{ runId: string; activityId: string } | null>(null);
 
-  const def = HARNESS_CATALOG[harness].activity;
+  const def = getActivityDef(harness, activityKey);
 
-  function selectHarness(next: HarnessType) {
-    setHarness(next);
-    setValues(defaultsFor(next));
+  function applyActivity(nextHarness: HarnessType, nextActivityKey: string) {
+    setHarness(nextHarness);
+    setActivityKey(nextActivityKey);
+    setValues(defaultsFor(nextHarness, nextActivityKey));
     setTitle('');
     setError('');
     setCreated(null);
+  }
+
+  function selectHarness(next: HarnessType) {
+    applyActivity(next, getActivityDef(next).key);
+  }
+
+  function selectActivity(next: ActivityDef) {
+    applyActivity(harness, next.key);
   }
 
   async function submit() {
@@ -189,13 +225,61 @@ export function ActivityAssignPanel({ onAssigned }: { onAssigned?: (runId: strin
         })}
       </div>
 
-      <div className="rounded-xl border border-border/60 bg-background/30 p-3">
-        <p className="text-xs font-medium text-foreground">{def.label}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{def.description}</p>
+      <div className="space-y-2">
+        <p className="text-[10px] font-heading uppercase tracking-wide text-muted-foreground">Actividad</p>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          {HARNESS_CATALOG[harness].activities.map((activity) => {
+            const active = activity.key === def.key;
+            return (
+              <button
+                key={activity.key}
+                type="button"
+                onClick={() => selectActivity(activity)}
+                className={cn(
+                  'rounded-xl border p-2.5 text-left transition-colors',
+                  active ? 'border-brand/50 bg-brand/10' : 'border-border/60 bg-background/30 hover:border-border'
+                )}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <p className="font-heading text-xs text-foreground">{activity.label}</p>
+                  <Pill
+                    label={activity.origin === 'original' ? 'ORIGINAL' : 'ADICIONAL'}
+                    tone={activity.origin === 'original' ? 'success' : 'neutral'}
+                    title={
+                      activity.origin === 'original'
+                        ? 'Ejecuta el código original del estudiante, vendorizado en harness/original/.'
+                        : 'Capacidad adicional que ya funcionaba en el Dashboard.'
+                    }
+                  />
+                </div>
+                <p className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">{activity.description}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
+      <div className="rounded-xl border border-border/60 bg-background/30 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-xs font-medium text-foreground">{def.label}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{def.description}</p>
+          </div>
+          {def.sourceUrl && (
+            <a href={def.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] text-brand hover:underline">
+              Código original
+            </a>
+          )}
+        </div>
+
+        {def.inputFields.length === 0 ? (
+          <p className="mt-3 rounded-lg border border-border/60 bg-background/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+            Esta actividad usa la configuración original, sin parámetros adicionales.
+          </p>
+        ) : (
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           {def.inputFields.map((field) => (
-            <label key={field.key} className={cn('block text-[11px] text-muted-foreground', field.type === 'textarea' && 'md:col-span-2')}>
+            <label key={field.key} className={cn('block text-[11px] text-muted-foreground', (field.type === 'textarea' || field.type === 'select') && 'md:col-span-2')}>
               <span className="font-heading uppercase tracking-wide">
                 {field.label}
                 {field.required ? ' *' : ''}
@@ -205,9 +289,21 @@ export function ActivityAssignPanel({ onAssigned }: { onAssigned?: (runId: strin
                   value={values[field.key] ?? ''}
                   onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
                   placeholder={field.placeholder}
-                  rows={3}
+                  rows={field.rows ?? 3}
                   className="mt-1 w-full rounded-lg border border-border/60 bg-background/60 px-2 py-1.5 font-mono text-[11px] text-foreground"
                 />
+              ) : field.type === 'select' ? (
+                <select
+                  value={values[field.key] ?? field.options?.[0]?.value ?? ''}
+                  onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-border/60 bg-background/60 px-2 py-1.5 text-xs text-foreground"
+                >
+                  {(field.options ?? []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               ) : (
                 <input
                   type={field.type === 'number' ? 'number' : 'text'}
@@ -233,6 +329,7 @@ export function ActivityAssignPanel({ onAssigned }: { onAssigned?: (runId: strin
             />
           </label>
         </div>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -414,24 +511,176 @@ function SupportGroups({ items }: { items: unknown[] }) {
   );
 }
 
+
+function B2BOriginalItems({ items }: { items: unknown[] }) {
+  const toneFor = (estado: unknown): Tone =>
+    estado === 'listo_para_validar'
+      ? 'success'
+      : estado === 'faltan_datos'
+        ? 'warning'
+        : estado === 'duplicado'
+          ? 'warning'
+          : estado === 'fuera_de_alcance'
+            ? 'muted'
+            : 'neutral';
+  return (
+    <ul className="space-y-1.5">
+      {items.map((raw, index) => {
+        const item = asRecord(raw);
+        const datos = asRecord(item.datos);
+        const faltantes = Array.isArray(item.faltantes) ? item.faltantes : [];
+        const banderas = asRecord(item.banderas);
+        return (
+          <li key={String(item.id ?? index)} className="rounded-xl border border-border/60 bg-background/40 p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] text-foreground">
+                <span className="font-mono">{String(item.id ?? `#${index + 1}`)}</span> ·{' '}
+                {String(datos.empresa ?? datos.nombre ?? 'Sin empresa')}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                <Pill label={String(item.estado ?? 'sin estado')} tone={toneFor(item.estado)} />
+                {banderas.urgente === true && <Pill label="Urgente" tone="danger" />}
+                {banderas.pide_precio === true && <Pill label="Pide precio" tone="warning" />}
+              </div>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {[datos.servicio, datos.ubicacion, datos.metros ? `${String(datos.metros)} m²` : undefined, datos.frecuencia]
+                .filter(Boolean)
+                .map((x) => String(x))
+                .join(' · ') || 'Sin datos extraídos'}
+            </p>
+            {faltantes.length > 0 && (
+              <p className="mt-1 text-[10px] text-amber-200">Faltan: {faltantes.map((f) => String(f)).join(', ')}</p>
+            )}
+            {typeof item.borrador_respuesta === 'string' && item.borrador_respuesta && (
+              <details className="mt-1 rounded-lg border border-border/60 bg-background/30 px-2 py-1">
+                <summary className="cursor-pointer text-[10px] text-muted-foreground">Borrador (NO enviado)</summary>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[10px] text-foreground/80">
+                  {item.borrador_respuesta}
+                </pre>
+              </details>
+            )}
+            <p className="mt-1 text-[10px] text-muted-foreground">enviado: {item.enviado === true ? 'sí' : 'no'}</p>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function SupportOriginalItems({ items }: { items: unknown[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {items.map((raw, index) => {
+        const ticket = asRecord(raw);
+        if (typeof ticket.error === 'string') {
+          return (
+            <li key={index} className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2 text-[11px] text-rose-300">
+              ticket[{index}]: {ticket.error}
+            </li>
+          );
+        }
+        const dev = asRecord(ticket.devHandoff);
+        const reply = asRecord(ticket.publicReplyDraft);
+        const redactions = Array.isArray(ticket.redactions) ? ticket.redactions : [];
+        return (
+          <li key={String(ticket.ticketId ?? index)} className="rounded-xl border border-border/60 bg-background/40 p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-mono text-[11px] text-foreground">{String(ticket.ticketId ?? `#${index + 1}`)}</p>
+              <div className="flex flex-wrap gap-1">
+                <Pill label={String(ticket.category ?? 'sin categoría')} tone="info" />
+                <Pill label={String(ticket.severity ?? '—')} tone={ticket.severity === 'critical' ? 'danger' : 'warning'} />
+                <Pill label={ticket.mustEscalate === true ? 'ESCALAR' : 'FAQ'} tone={ticket.mustEscalate === true ? 'danger' : 'success'} />
+              </div>
+            </div>
+            {typeof ticket.handoffSummary === 'string' && (
+              <p className="mt-1 break-words text-[11px] text-foreground/90">{ticket.handoffSummary}</p>
+            )}
+            {Array.isArray(ticket.escalationReasons) && ticket.escalationReasons.length > 0 && (
+              <p className="mt-1 text-[10px] text-amber-200">Motivos: {ticket.escalationReasons.map((r) => String(r)).join(', ')}</p>
+            )}
+            {redactions.length > 0 && (
+              <p className="mt-1 text-[10px] text-emerald-300">Secretos enmascarados: {redactions.map((r) => String(r)).join(', ')}</p>
+            )}
+            <details className="mt-1 rounded-lg border border-border/60 bg-background/30 px-2 py-1">
+              <summary className="cursor-pointer text-[10px] text-muted-foreground">Dev handoff</summary>
+              <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words text-[10px] text-foreground/80">
+                {JSON.stringify(dev, null, 2)}
+              </pre>
+            </details>
+            {typeof reply.text === 'string' && reply.text && (
+              <details className="mt-1 rounded-lg border border-border/60 bg-background/30 px-2 py-1">
+                <summary className="cursor-pointer text-[10px] text-muted-foreground">
+                  Borrador FAQ ({String(reply.sendStatus ?? 'NOT_SENT')}; requiere aprobación)
+                </summary>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[10px] text-foreground/80">
+                  {reply.text}
+                </pre>
+              </details>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function MarketingCampaignMaterials({ items, report }: { items: unknown[]; report?: unknown }) {
+  return (
+    <div className="space-y-2">
+      <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200">
+        Material generado, NO publicado. Requiere revisión y aprobación humana antes de publicar.
+      </p>
+      {items.map((raw, index) => {
+        const material = asRecord(raw);
+        return (
+          <details key={index} className="rounded-lg border border-border/60 bg-background/30 px-2 py-1.5">
+            <summary className="cursor-pointer text-[10px] text-muted-foreground">
+              {String(material.file ?? `Material ${index + 1}`)}
+            </summary>
+            <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words text-[10px] text-foreground/80">
+              {String(material.content ?? '')}
+            </pre>
+          </details>
+        );
+      })}
+      {report !== undefined && report !== null && (
+        <details className="rounded-lg border border-border/60 bg-background/30 px-2 py-1.5">
+          <summary className="cursor-pointer text-[10px] text-muted-foreground">Reporte de ejecución</summary>
+          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words text-[10px] text-foreground/80">
+            {JSON.stringify(report, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function ActivityResultBody({ activity }: { activity: HarnessActivityItem }) {
   const result = asRecord(activity.result);
   const items = Array.isArray(result.items) ? result.items : [];
   const rejections = Array.isArray(result.rejections) ? result.rejections : [];
   const summary = activity.summary ?? result.summary;
+  const kind = typeof result.kind === 'string' ? result.kind : activity.harnessType;
 
   return (
     <div className="space-y-2">
       <SummaryGrid summary={summary} />
       {items.length > 0 &&
-        (activity.harnessType === 'prospecting' ? (
+        (kind === 'prospecting' || kind === 'prospecting_original' ? (
           <ProspectingItems items={items} />
-        ) : activity.harnessType === 'b2b' ? (
+        ) : kind === 'b2b' ? (
           <B2BItems items={items} />
-        ) : activity.harnessType === 'marketing' ? (
+        ) : kind === 'b2b_original' ? (
+          <B2BOriginalItems items={items} />
+        ) : kind === 'marketing' ? (
           <MarketingFindings items={items} />
-        ) : (
+        ) : kind === 'marketing_original' ? (
+          <MarketingCampaignMaterials items={items} report={result.report} />
+        ) : kind === 'support' ? (
           <SupportGroups items={items} />
+        ) : (
+          <SupportOriginalItems items={items} />
         ))}
       {typeof result.note === 'string' && (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200">{result.note}</p>
@@ -487,20 +736,30 @@ export function ActivityResultsPanel({ activities }: { activities: HarnessActivi
           {ordered.map((activity) => {
             const badge = toUiBadge(activity.status);
             const catalog = isHarnessType(activity.harnessType) ? HARNESS_CATALOG[activity.harnessType] : null;
+            const activityDef = catalog?.activities.find((item) => item.key === activity.activity) ?? null;
             return (
               <li key={activity.activityId} className="rounded-xl border border-border/60 bg-background/30 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">
-                      {catalog?.label ?? activity.harnessType} · {activity.title}
+                      {catalog?.label ?? activity.harnessType} · {activityDef?.label ?? activity.title}
                     </p>
                     <p className="mt-0.5 break-all font-mono text-[10px] text-muted-foreground">
                       {activity.activityId} · creada {formatDateTime(activity.createdAt)}
                       {activity.finishedAt ? ` · cerrada ${formatDateTime(activity.finishedAt)}` : ''}
                     </p>
+                    {activityDef?.sourceUrl && (
+                      <a href={activityDef.sourceUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-[10px] text-brand hover:underline">
+                        Código original
+                      </a>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <Pill label={badge.label} tone={badge.tone} />
+                    <Pill
+                      label={activityDef?.origin === 'original' ? 'ORIGINAL' : 'ADICIONAL'}
+                      tone={activityDef?.origin === 'original' ? 'success' : 'neutral'}
+                    />
                     <OriginPill origin="real" />
                   </div>
                 </div>

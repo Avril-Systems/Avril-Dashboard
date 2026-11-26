@@ -25,8 +25,9 @@ aparte (`script/harness-worker.mjs`).
 | Paneles | `src/components/office/SwarmyPanels.tsx` | Cadena de handoff, harnesses, estado de control. Solo presentación. |
 | Pantalla | `app/(app)/agents/swarmy/page.tsx` | Consola. URL: `/agents/swarmy?runId=<id>` |
 | Actividades (asignar/consultar) | `src/components/office/HarnessActivityPanel.tsx` + `app/api/orchestration/harness/activities/route.ts` | Elige arnés, encola una actividad y muestra el resultado real. Ver `docs/SWARMY_ACTIVITIES.md`. |
-| Ejecución real | `script/harness-worker.mjs` + `script/harness-adapters.mjs` | Worker aparte: heartbeat, claim atómico y adaptadores de prospección/B2B/marketing/soporte. |
-| Cola durable | `convex/schema.ts` (`harnessActivities`) + `convex/lib/harnessActivities.ts` | Actividades, estados y catálogo compartido con la UI. |
+| Ejecución real | `script/harness-worker.mjs` + `script/harness-activity-adapters.mjs` | Worker aparte: heartbeat, claim atómico y registro de 8 actividades (4 originales + 4 adicionales). |
+| Código original de los arneses | `harness/original/` + `script/harness-original-adapters.mjs` | Prospección, B2B, soporte y marketing vendorizados; el worker los ejecuta como subproceso. Ver `harness/original/README.md`. |
+| Cola durable | `convex/schema.ts` (`harnessActivities`) + `convex/lib/harnessActivities.ts` | Actividades, estados y catálogo compartido con la UI (original/adicional). |
 
 "Tareas" en esta vista = actividades asignadas (`harnessActivities`) y pasos de la cadena de handoff. "Agentes" =
 harnesses (conexiones con latido). La tabla `tasks` de Convex no tiene `runId`, por eso no se mezcla con las
@@ -58,9 +59,12 @@ contra el Convex de desarrollo. Si falta alguna, las rutas responden `503 CONFIG
 ### Actividades de los cuatro arneses
 
 La consola permite asignar una actividad a soporte, B2B, prospección o marketing.
-La actividad se encola en Convex y la ejecuta un worker real (`npm run harness:worker`);
-sin worker queda en cola y la UI lo muestra. El detalle completo, contrato y
-evidencia están en [`SWARMY_ACTIVITIES.md`](./SWARMY_ACTIVITIES.md).
+Cada arnés conserva su **actividad original** (código del estudiante vendorizado en
+`harness/original/`) y su **actividad adicional** (la que ya funcionaba en el
+Dashboard). La actividad se encola en Convex y la ejecuta un worker real
+(`npm run harness:worker`); sin worker queda en cola y la UI lo muestra. El
+detalle completo, setup de Python/LLM, contrato y evidencia están en
+[`SWARMY_ACTIVITIES.md`](./SWARMY_ACTIVITIES.md).
 
 ## 4. Cómo correr y probar
 

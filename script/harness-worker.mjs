@@ -16,7 +16,8 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { anyApi } from 'convex/server';
 import { HARNESS_TYPES, isHarnessType } from '../convex/lib/harnessActivities.ts';
-import { AdapterBlockedError, runB2B, runMarketing, runProspecting, runSupport } from './harness-adapters.mjs';
+import { AdapterBlockedError } from './harness-adapters.mjs';
+import { ACTIVITY_ADAPTERS } from './harness-activity-adapters.mjs';
 
 // Cargar .env.local desde la raíz del repo (Node >= 20.12 / 22+).
 try {
@@ -24,13 +25,6 @@ try {
 } catch {
   // Sin archivo: se usan las variables del entorno de la terminal.
 }
-
-const ADAPTERS = {
-  prospecting: runProspecting,
-  b2b: runB2B,
-  marketing: runMarketing,
-  support: runSupport,
-};
 
 function argValue(name) {
   const prefix = `${name}=`;
@@ -155,10 +149,15 @@ async function loadProspectingHistory() {
     });
     const handles = new Set();
     for (const row of rows ?? []) {
-      const items = row?.result?.items;
-      if (!Array.isArray(items)) continue;
-      for (const item of items) {
-        if (item && typeof item.handle === 'string') handles.add(item.handle);
+      const result = row?.result ?? {};
+      // El adapter adicional guarda todos los verificados en `items`; el original
+      // guarda top 5 en `items`, todos en `verified` y el histórico acumulado.
+      for (const collection of [result.items, result.verified, result.history]) {
+        if (!Array.isArray(collection)) continue;
+        for (const item of collection) {
+          if (typeof item === 'string') handles.add(item);
+          else if (item && typeof item.handle === 'string') handles.add(item.handle);
+        }
       }
     }
     return [...handles];
@@ -195,9 +194,9 @@ async function processOne(harness) {
   const activity = await claimNext(harness);
   if (!activity) return false;
 
-  const adapter = ADAPTERS[harness];
+  const adapter = ACTIVITY_ADAPTERS[activity.activity];
   if (!adapter) {
-    await finish(activity, 'failed', undefined, `No existe adaptador para el arnés '${harness}'.`);
+    await finish(activity, 'failed', undefined, `No existe adaptador para la actividad '${activity.activity}'.`);
     return true;
   }
 
@@ -207,7 +206,7 @@ async function processOne(harness) {
   log(harness, `ejecutando '${activity.activity}'`, activity.activityId);
 
   try {
-    if (adapter === runProspecting) activity.history = await loadProspectingHistory();
+    if (harness === 'prospecting') activity.history = await loadProspectingHistory();
     const ctx = {
       log: (message) => log(harness, message, activity.activityId),
       tenantId: TENANT_ID,

@@ -25,6 +25,22 @@ function text(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
+/** Acepta un JSON en texto (lo que manda la UI) o un valor ya parseado. */
+function parseJsonValue(v: unknown, field: string, maxBytes = 30_000): unknown {
+  if (v === undefined || v === null || v === '') return undefined;
+  let parsed = v;
+  if (typeof v === 'string') {
+    if (v.length > maxBytes) throw new HarnessInputError(`${field} es demasiado grande.`);
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      throw new HarnessInputError(`${field} no es JSON válido.`);
+    }
+  }
+  if (JSON.stringify(parsed).length > maxBytes) throw new HarnessInputError(`${field} es demasiado grande.`);
+  return parsed;
+}
+
 function splitList(v: unknown, max: number, maxLen: number, separator: RegExp = /[\n,]+/): string[] {
   const raw = typeof v === 'string' ? v : Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').join('\n') : '';
   const parts = raw
@@ -104,10 +120,95 @@ export function normalizeActivityInput(
   if (!isHarnessType(harnessType)) throw new HarnessInputError('Arnés no válido.');
   if (!isActivityForHarness(harnessType, activity)) throw new HarnessInputError('Actividad no válida para ese arnés.');
 
-  const def = getActivityDef(harnessType);
-  const raw = asRecord(rawInput);
+  const def = getActivityDef(harnessType, activity as string);
+  // La UI manda los defaults, pero la API también debe funcionar sin input:
+  // se aplican los defaultValue del catálogo antes de normalizar.
+  const defaults: Record<string, unknown> = {};
+  for (const field of def.inputFields) {
+    if (field.defaultValue !== undefined) defaults[field.key] = field.defaultValue;
+  }
+  const raw = { ...defaults, ...asRecord(rawInput) };
 
   switch (def.key) {
+    case 'github_discovery_original': {
+      // El prototipo original no acepta parámetros: usa su configuración y sus 7 búsquedas.
+      return { harnessType, input: {} };
+    }
+    case 'b2b_intake_original': {
+      const solicitudesRaw = parseJsonValue(raw.solicitudes, 'solicitudes', 60_000);
+      let solicitudes: unknown[] | undefined;
+      if (solicitudesRaw !== undefined) {
+        solicitudes = Array.isArray(solicitudesRaw) ? solicitudesRaw : [solicitudesRaw];
+        if (!solicitudes.length) throw new HarnessInputError('solicitudes no puede estar vacío.');
+        if (solicitudes.length > 20) throw new HarnessInputError('Máximo 20 solicitudes por actividad.');
+        for (const [index, item] of solicitudes.entries()) {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            throw new HarnessInputError(`solicitudes[${index}] debe ser un objeto.`);
+          }
+          if (typeof (item as Record<string, unknown>).mensaje !== 'string') {
+            throw new HarnessInputError(`solicitudes[${index}] debe incluir "mensaje".`);
+          }
+        }
+      }
+      const sectorRaw = parseJsonValue(raw.sector, 'sector', 30_000);
+      if (sectorRaw !== undefined && (typeof sectorRaw !== 'object' || Array.isArray(sectorRaw))) {
+        throw new HarnessInputError('sector debe ser un objeto JSON.');
+      }
+      const modo = text(raw.modo) || 'reglas';
+      if (modo !== 'reglas' && modo !== 'modelo') throw new HarnessInputError('modo debe ser reglas o modelo.');
+      return {
+        harnessType,
+        input: {
+          ...(solicitudes ? { solicitudes } : {}),
+          ...(sectorRaw ? { sector: sectorRaw } : {}),
+          modo,
+        },
+      };
+    }
+    case 'support_ticket_triage': {
+      const rawTicket = parseJsonValue(raw.ticket, 'ticket', 60_000);
+      if (rawTicket === undefined) throw new HarnessInputError('Falta el ticket JSON.');
+      const tickets = Array.isArray(rawTicket) ? rawTicket : [rawTicket];
+      if (!tickets.length) throw new HarnessInputError('El ticket no puede estar vacío.');
+      if (tickets.length > 20) throw new HarnessInputError('Máximo 20 tickets por actividad.');
+      for (const [index, item] of tickets.entries()) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          throw new HarnessInputError(`ticket[${index}] debe ser un objeto SupportTicketRecord.`);
+        }
+        const record = item as Record<string, unknown>;
+        if (typeof record.message !== 'string' || !record.message.trim()) {
+          throw new HarnessInputError(`ticket[${index}] debe incluir "message".`);
+        }
+        if (typeof record.ticketId !== 'string' && typeof record.id !== 'string') {
+          throw new HarnessInputError(`ticket[${index}] debe incluir "ticketId".`);
+        }
+      }
+      return { harnessType, input: { ticket: Array.isArray(rawTicket) ? tickets : tickets[0] } };
+    }
+    case 'marketing_campaign': {
+      const rawBriefing = parseJsonValue(raw.briefing, 'briefing', 60_000);
+      if (rawBriefing !== undefined) {
+        if (!rawBriefing || typeof rawBriefing !== 'object' || Array.isArray(rawBriefing)) {
+          throw new HarnessInputError('briefing debe ser un objeto JSON.');
+        }
+        const obj = rawBriefing as Record<string, unknown>;
+        const pieces = Array.isArray(obj.piezas) ? obj.piezas : null;
+        if (pieces) {
+          if (!pieces.length) throw new HarnessInputError('briefing.piezas no puede estar vacío.');
+          if (pieces.length > 5) throw new HarnessInputError('Máximo 5 piezas por campaña.');
+        } else if (typeof obj.tipo_pieza !== 'string') {
+          throw new HarnessInputError('briefing debe incluir "piezas" o "tipo_pieza".');
+        }
+      }
+      const modelo = text(raw.modelo).slice(0, 100);
+      return {
+        harnessType,
+        input: {
+          ...(rawBriefing !== undefined ? { briefing: rawBriefing } : {}),
+          ...(modelo ? { modelo } : {}),
+        },
+      };
+    }
     case 'github_discovery': {
       const queries = splitList(raw.queries, 7, 200, /[\n]+/);
       const maxCandidates = clampInt(raw.maxCandidates, 5, 40, 20);

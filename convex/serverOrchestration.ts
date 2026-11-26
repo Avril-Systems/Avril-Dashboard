@@ -766,7 +766,7 @@ export const assignHarnessActivity = mutation({
     const runId = args.runId?.trim() || `run_${args.harnessType}_${now.toString(36)}_${suffix}`;
     requireSafeId(runId, "runId");
 
-    const def = getActivityDef(args.harnessType);
+    const def = getActivityDef(args.harnessType, args.activity);
     const title = (args.title?.trim() || def.defaultTitle).slice(0, 120);
     const createdBy = (args.createdBy?.trim() || "dashboard").slice(0, 80);
 

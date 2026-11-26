@@ -320,6 +320,7 @@ export async function runB2B(input, ctx) {
   }
   const average = reachable.reduce((sum, i) => sum + i.score, 0) / reachable.length;
   return {
+    kind: 'b2b',
     summary: {
       targets: targets.length,
       reachable: reachable.length,
@@ -376,6 +377,7 @@ export async function runMarketing(input, ctx) {
   const score = Math.max(0, 100 - findings.reduce((sum, f) => sum + (weight[f.severity] ?? 0), 0));
 
   return {
+    kind: 'marketing',
     summary: {
       url,
       finalUrl: page.finalUrl,
@@ -480,6 +482,7 @@ export async function runSupport(input, ctx) {
   const items = [...groups.values()].sort((a, b) => b.count - a.count || Date.parse(b.lastAt) - Date.parse(a.lastAt));
   const latestAt = items.reduce((latest, g) => (!latest || Date.parse(g.lastAt) > Date.parse(latest) ? g.lastAt : latest), '');
   return {
+    kind: 'support',
     summary: {
       windowHours: lookbackHours,
       severity: severity || null,
@@ -681,6 +684,7 @@ export async function runProspecting(input, ctx) {
   const all = ordered.map(({ _score_prioridad, ...rest }, index) => ({ ...rest, prioridad: index + 1 }));
   const top5 = all.slice(0, 5);
   return {
+    kind: 'prospecting',
     summary: {
       queries: queries.length,
       discovered: discovered.length,
