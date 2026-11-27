@@ -26,6 +26,7 @@ import type * as serverChats from "../serverChats.js";
 import type * as serverControlPlane from "../serverControlPlane.js";
 import type * as serverDeployments from "../serverDeployments.js";
 import type * as serverFounder from "../serverFounder.js";
+import type * as serverIntentions from "../serverIntentions.js";
 import type * as serverOrchestration from "../serverOrchestration.js";
 import type * as serverUsers from "../serverUsers.js";
 import type * as summarize from "../summarize.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   serverControlPlane: typeof serverControlPlane;
   serverDeployments: typeof serverDeployments;
   serverFounder: typeof serverFounder;
+  serverIntentions: typeof serverIntentions;
   serverOrchestration: typeof serverOrchestration;
   serverUsers: typeof serverUsers;
   summarize: typeof summarize;

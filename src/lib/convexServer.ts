@@ -510,6 +510,60 @@ export async function listAgentToolProposals(args: {
   return Array.isArray(rows) ? rows : [];
 }
 
+/** Intención estratégica y particulares por arnés. */
+export type SessionIntentions = {
+  strategic: string | null;
+  harness: Record<string, string>;
+  updatedAt: string | null;
+};
+
+export async function getSessionIntentions(args: { sessionId: string }): Promise<SessionIntentions> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query('serverIntentions:getIntentionsServer', {
+    sessionId: args.sessionId,
+    serverSecret,
+  });
+}
+
+export async function setSessionStrategy(args: {
+  sessionId: string;
+  strategic?: string;
+  harnessIntentions?: Array<{ harnessType: string; body: string }>;
+  source: 'user' | 'orchestrator' | 'harness';
+  updatedBy?: string;
+}): Promise<SessionIntentions> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverIntentions:setStrategyServer', {
+    sessionId: args.sessionId,
+    ...(args.strategic !== undefined ? { strategic: args.strategic } : {}),
+    ...(args.harnessIntentions !== undefined ? { harnessIntentions: args.harnessIntentions } : {}),
+    source: args.source,
+    ...(args.updatedBy ? { updatedBy: args.updatedBy } : {}),
+    serverSecret,
+  });
+}
+
+export async function setSessionHarnessIntention(args: {
+  sessionId: string;
+  harnessType: string;
+  body: string;
+  source: 'user' | 'orchestrator' | 'harness';
+  updatedBy?: string;
+}): Promise<{ harnessType: string; body: string }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverIntentions:setHarnessIntentionServer', {
+    sessionId: args.sessionId,
+    harnessType: args.harnessType,
+    body: args.body,
+    source: args.source,
+    ...(args.updatedBy ? { updatedBy: args.updatedBy } : {}),
+    serverSecret,
+  });
+}
+
 export async function getControlPlaneState(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();

@@ -8,6 +8,7 @@ import {
   getAgentChat,
   getDefaultOrganizationId,
   getOrCreateAgentChat,
+  getSessionIntentions,
   listChats,
   listMessages,
   recordAgentToolCall,
@@ -29,6 +30,7 @@ import {
 import {
   augmentAgentMessageForModel,
   buildAgentSystemPrompt,
+  buildIntentionReminder,
 } from '@/src/modules/agents/buildAgentSystemPrompt';
 import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
@@ -38,7 +40,6 @@ import {
   toolsForAgent,
 } from '@/src/modules/agents/toolCatalog';
 import { isActivityForHarness } from '@/convex/lib/harnessActivities';
-import { detectIntent } from '@/src/modules/agents/intent';
 import { buildTurnMeta } from '@/src/modules/agents/turnMeta';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
 import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
@@ -144,6 +145,8 @@ type BridgeInput = {
   maxContextChars?: number;
   /** System prompt: Avril architect (founder flow) or the targeted agent's persona. */
   systemPrompt?: string;
+  /** Recordatorio de intenciones vigentes (se inserta tras el historial). */
+  intentionReminder?: string;
 };
 
 type VeniceResult =
@@ -195,6 +198,14 @@ function buildChatMessages(input: BridgeInput): Array<{ role: 'system' | 'user' 
     { role: 'system', content: systemMain },
     ...(input.summary ? [{ role: 'system' as const, content: `Conversation summary: ${input.summary}` }] : []),
     ...fromContext,
+    ...(input.intentionReminder
+      ? [
+          {
+            role: 'user' as const,
+            content: `${input.intentionReminder}\n\n(Esta es la versión vigente; prevalece sobre el historial. Responde con ella.)`,
+          },
+        ]
+      : []),
     { role: 'user', content: augmentForMode(input.mode, input.message) },
   ];
 }
@@ -609,7 +620,11 @@ export async function POST(req: Request) {
       }
 
       const call: ToolCall = { tool: def.name, args: claim.proposal.args };
-      const outcome = await executeConfirmedAgentTool(call, { harnessType: confirmHarness });
+      const outcome = await executeConfirmedAgentTool(call, {
+        sessionId: claim.proposal.sessionId,
+        harnessType: confirmHarness,
+        agentKey: claim.proposal.agentKey,
+      });
 
       try {
         await finishAgentToolProposal({
@@ -721,6 +736,7 @@ export async function POST(req: Request) {
     let summaryText: string | undefined;
     let agentIdentity: ResolvedAgentIdentity | null = null;
     let agentTools: AgentToolDef[] = [];
+    let intentionReminder: string | undefined;
 
     if (agentTarget) {
       let resolved: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
@@ -747,7 +763,21 @@ export async function POST(req: Request) {
       });
       // Punto 3: el orquestador ve todas las tools; cada arnés solo las suyas.
       agentTools = toolsForAgent(identity.persona.harnessType);
-      systemPrompt = buildAgentSystemPrompt(identity, { sessionId, tools: agentTools });
+
+      // Intención persistida (se relee en cada turno; sobrevive a chats y cambios de modelo).
+      let sessionIntentions: Awaited<ReturnType<typeof getSessionIntentions>> | null = null;
+      try {
+        sessionIntentions = await getSessionIntentions({ sessionId: agentSessionId });
+      } catch {
+        sessionIntentions = null;
+      }
+
+      systemPrompt = buildAgentSystemPrompt(identity, {
+        sessionId,
+        tools: agentTools,
+        intentions: sessionIntentions,
+      });
+      intentionReminder = buildIntentionReminder(identity, sessionIntentions) ?? undefined;
       agentIdentity = identity;
     } else {
       const requestedChatId = chatIdFromBody as string;
@@ -829,135 +859,11 @@ export async function POST(req: Request) {
       area,
       subArea,
       systemPrompt,
+      ...(intentionReminder ? { intentionReminder } : {}),
       ...(summaryText ? { summary: summaryText } : {}),
       messages: contextMessages.length > 0 ? contextMessages : undefined,
       maxContextChars: BRIDGE_CONTEXT_MAX_CHARS,
     };
-
-    /**
-     * S05: enrutado determinista por intención. Evita depender de que Venice emita el
-     * bloque de tool. Solo aplica al orquestador y con señales de alta confianza.
-     */
-    const detectedIntent =
-      mode === 'agent' && agentTools.length > 0 && agentIdentity?.persona.harnessType === null
-        ? detectIntent(message)
-        : ({ kind: 'none' } as const);
-
-    if (detectedIntent.kind === 'read') {
-      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
-      const outcome = await executeAgentTool(call, {
-        sessionId: agentSessionId,
-        harnessType: agentIdentity?.persona.harnessType ?? null,
-      });
-
-      try {
-        const data = outcome.ok ? (outcome.data as any) : undefined;
-        await recordAgentToolCall({
-          chatId,
-          sessionId: agentSessionId,
-          agentKey: agentAuthorId ?? 'agent',
-          tool: outcome.tool,
-          args: call.args,
-          ok: outcome.ok,
-          error: outcome.ok ? undefined : outcome.error,
-          runId: typeof data?.runId === 'string' ? data.runId : undefined,
-          activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
-        });
-      } catch {
-        // La traza no debe romper la respuesta.
-      }
-
-      const reply = summarizeToolOutcome(outcome);
-      const meta = buildTurnMeta({
-        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
-        tools: [{ tool: outcome.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
-      });
-      try {
-        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
-      } catch (err) {
-        return errorResponse(502, 'CONVEX_ERROR', 'Tool ejecutada pero falló al persistir la respuesta.', {
-          retryable: true,
-          details: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        mode,
-        chatId,
-        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
-        reply,
-        toolCalls: [
-          {
-            tool: outcome.tool,
-            args: call.args,
-            ok: outcome.ok,
-            ...(outcome.ok ? {} : { error: outcome.error }),
-          },
-        ],
-        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
-        meta,
-      });
-    }
-
-    if (detectedIntent.kind === 'proposal' || detectedIntent.kind === 'control') {
-      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
-      const summary = describeToolProposal(call);
-      const reply = [
-        `Propongo ejecutar \`${call.tool}\`:`,
-        summary,
-        '',
-        'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
-      ].join('\n');
-      const meta = buildTurnMeta({
-        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
-        tools: [],
-        proposal: true,
-      });
-
-      let createdProposal: { proposalId: string; expiresAt: number };
-      try {
-        createdProposal = await createAgentToolProposal({
-          chatId,
-          agentKey: agentAuthorId ?? '',
-          tool: call.tool,
-          args: call.args,
-          summary,
-        });
-      } catch (err) {
-        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
-          retryable: true,
-          details: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      try {
-        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
-      } catch (err) {
-        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
-          retryable: true,
-          details: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        mode,
-        chatId,
-        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
-        reply,
-        requiresConfirmation: true,
-        proposal: {
-          id: createdProposal.proposalId,
-          expiresAt: createdProposal.expiresAt,
-          tool: call.tool,
-          arguments: call.args,
-          summary,
-        },
-        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
-        meta,
-      });
-    }
 
     const provider = resolveProvider(body.model);
     const wantsMock = provider === 'mock';
@@ -1032,6 +938,34 @@ export async function POST(req: Request) {
         if (!callDef || !isToolAllowedForAgent(callDef.name, harnessScope)) {
           agentFinalText = 'Esa herramienta no está disponible para este agente.';
         } else if (callDef.kind === 'write') {
+          if (callDef.direct) {
+            // Escrituras de intención: el mensaje del usuario es la instrucción; se aplican en el turno.
+            const outcome = await executeConfirmedAgentTool(parsedCall.call, {
+              sessionId: agentSessionId,
+              harnessType: harnessScope,
+              agentKey: agentAuthorId ?? 'agent',
+            });
+            toolCalls.push({
+              tool: outcome.tool,
+              args: parsedCall.call.args,
+              ok: outcome.ok,
+              ...(outcome.ok ? {} : { error: outcome.error }),
+            });
+            try {
+              await recordAgentToolCall({
+                chatId,
+                sessionId: agentSessionId,
+                agentKey: agentAuthorId ?? 'agent',
+                tool: outcome.tool,
+                args: parsedCall.call.args,
+                ok: outcome.ok,
+                error: outcome.ok ? undefined : outcome.error,
+              });
+            } catch {
+              // La traza no debe romper la respuesta.
+            }
+            agentFinalText = summarizeConfirmedToolOutcome(outcome);
+          } else {
           const requestedHarness =
             typeof parsedCall.call.args.harnessType === 'string'
               ? parsedCall.call.args.harnessType.trim()
@@ -1086,10 +1020,12 @@ export async function POST(req: Request) {
             'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
           ].join('\n');
           }
+          }
         } else {
           const outcome = await executeAgentTool(parsedCall.call, {
             sessionId: agentSessionId,
             harnessType: harnessScope,
+            agentKey: agentAuthorId ?? 'agent',
           });
           toolCalls.push({
             tool: outcome.tool,

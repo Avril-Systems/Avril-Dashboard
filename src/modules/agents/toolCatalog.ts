@@ -4,7 +4,9 @@
  * `read`: consultan estado real (Swarmy/Convex) y se ejecutan en el turno.
  * `write`: proponen una acción real; el servidor NO las ejecuta en el turno del
  * modelo. Se devuelve una propuesta y solo se ejecutan cuando el operador confirma
- * explícitamente en la UI (POST con `confirmTool`).
+ * explícitamente en la UI (POST con `confirmProposalId`).
+ * `direct: true`: escrituras de texto (intenciones) que se aplican en el turno,
+ * porque el propio mensaje del usuario es la instrucción; no son acciones de negocio.
  *
  * Puro, sin imports de servidor: prompt, validador y UI comparten la definición.
  * Regla: si una tool no tiene ejecutor real, no existe aquí.
@@ -17,7 +19,12 @@ export type AgentToolName =
   | 'list_agents'
   | 'get_activity_result'
   | 'assign_activity'
-  | 'request_control';
+  | 'request_control'
+  | 'get_intentions'
+  | 'get_my_intention'
+  | 'set_strategy'
+  | 'set_harness_intention'
+  | 'set_my_intention';
 
 export type AgentToolKind = 'read' | 'write';
 
@@ -31,6 +38,8 @@ export type AgentToolArg = {
 export type AgentToolDef = {
   name: AgentToolName;
   kind: AgentToolKind;
+  /** Escrituras de intención: se aplican en el turno (no requieren confirmación). */
+  direct?: boolean;
   description: string;
   args: AgentToolArg[];
 };
@@ -112,6 +121,54 @@ export const AGENT_TOOLS: AgentToolDef[] = [
       { name: 'command', type: 'string', required: true, description: 'pause | kill.' },
     ],
   },
+  {
+    name: 'get_intentions',
+    kind: 'read',
+    description:
+      'Consulta la intención general de la sesión y las intenciones particulares de los arneses. Úsalo para saber el rumbo antes de decidir.',
+    args: [],
+  },
+  {
+    name: 'get_my_intention',
+    kind: 'read',
+    description:
+      'Consulta tu intención particular (y la intención general de la sesión). Úsalo si necesitas recordar tu mandato.',
+    args: [],
+  },
+  {
+    name: 'set_strategy',
+    kind: 'write',
+    direct: true,
+    description:
+      'Define/actualiza la intención general y deriva intenciones particulares para los arneses. Texto breve (≤600 caracteres por intención). No es una orden de ejecución: los arneses deciden cómo cumplirla.',
+    args: [
+      { name: 'strategic', type: 'string', description: 'Intención general de la sesión (una o dos frases).' },
+      {
+        name: 'harnessIntentions',
+        type: 'object',
+        description: 'Lista de { harnessType, body } con una intención breve por arnés.',
+      },
+    ],
+  },
+  {
+    name: 'set_harness_intention',
+    kind: 'write',
+    direct: true,
+    description:
+      'Actualiza la intención particular de un arnés concreto (intervención directa del usuario). Texto breve (≤600 caracteres).',
+    args: [
+      { name: 'harnessType', type: 'string', required: true, description: 'support | b2b | prospecting | marketing.' },
+      { name: 'body', type: 'string', required: true, description: 'Intención breve del arnés.' },
+    ],
+  },
+  {
+    name: 'set_my_intention',
+    kind: 'write',
+    direct: true,
+    description:
+      'Actualiza tu propia intención particular cuando el usuario te lo pida explícitamente. Texto breve (≤600 caracteres).',
+    args: [{ name: 'body', type: 'string', required: true, description: 'Nueva intención breve.' }],
+  },
 ];
 
 export function getAgentTool(name: string): AgentToolDef | null {
@@ -123,7 +180,13 @@ export function isWriteTool(name: string): boolean {
 }
 
 /** Tools disponibles para un agente. El orquestador ve todas; un arnés solo las suyas. */
-const HARNESS_TOOL_NAMES: AgentToolName[] = ['list_activities', 'get_activity_result', 'assign_activity'];
+const HARNESS_TOOL_NAMES: AgentToolName[] = [
+  'list_activities',
+  'get_activity_result',
+  'assign_activity',
+  'get_my_intention',
+  'set_my_intention',
+];
 
 export function toolsForAgent(harnessType: string | null): AgentToolDef[] {
   if (!harnessType) return AGENT_TOOLS;
@@ -132,4 +195,9 @@ export function toolsForAgent(harnessType: string | null): AgentToolDef[] {
 
 export function isToolAllowedForAgent(name: string, harnessType: string | null): boolean {
   return toolsForAgent(harnessType).some((tool) => tool.name === name);
+}
+
+/** Escritura de intención que se aplica en el turno (sin propuesta). */
+export function isDirectWrite(name: string): boolean {
+  return getAgentTool(name)?.direct === true;
 }

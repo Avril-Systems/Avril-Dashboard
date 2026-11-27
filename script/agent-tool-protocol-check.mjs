@@ -109,7 +109,13 @@ test('toolsForAgent: orquestador ve todas; arnés solo list/assign', () => {
   const orchestrator = toolsForAgent(null).map((t) => t.name).sort();
   const support = toolsForAgent('support').map((t) => t.name).sort();
   assert.deepEqual(orchestrator, AGENT_TOOLS.map((t) => t.name).sort());
-  assert.deepEqual(support, ['assign_activity', 'get_activity_result', 'list_activities']);
+  assert.deepEqual(support, [
+    'assign_activity',
+    'get_activity_result',
+    'get_my_intention',
+    'list_activities',
+    'set_my_intention',
+  ]);
 });
 
 test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
@@ -118,6 +124,10 @@ test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
   assert.equal(isToolAllowedForAgent('list_activities', 'marketing'), true);
   assert.equal(isToolAllowedForAgent('assign_activity', 'marketing'), true);
   assert.equal(isToolAllowedForAgent('get_activity_result', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('get_my_intention', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('set_my_intention', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('set_strategy', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('set_harness_intention', 'marketing'), false);
   assert.equal(isToolAllowedForAgent('run_overview', null), true);
 });
 
@@ -147,4 +157,34 @@ test('parseToolCall acepta get_activity_result con activityId', () => {
 
 test('get_activity_result exige activityId', () => {
   assert.equal(parseToolCall('```tool\n{"tool":"get_activity_result","arguments":{}}\n```').kind, 'invalid');
+});
+
+test('parseToolCall acepta set_strategy con particulares', () => {
+  const parsed = parseToolCall(
+    '```tool\n{"tool":"set_strategy","arguments":{"strategic":"Validar demanda B2B","harnessIntentions":[{"harnessType":"b2b","body":"Conseguir 5 leads"}]}}\n```'
+  );
+  assert.equal(parsed.kind, 'call');
+  if (parsed.kind !== 'call') return;
+  assert.equal(parsed.call.tool, 'set_strategy');
+  assert.equal(parsed.call.args.strategic, 'Validar demanda B2B');
+});
+
+test('set_harness_intention exige harnessType y body', () => {
+  assert.equal(parseToolCall('```tool\n{"tool":"set_harness_intention","arguments":{"harnessType":"b2b"}}\n```').kind, 'invalid');
+  assert.equal(
+    parseToolCall('```tool\n{"tool":"set_harness_intention","arguments":{"harnessType":"b2b","body":"X"}}\n```').kind,
+    'call'
+  );
+});
+
+test('describeToolProposal resume una estrategia', () => {
+  const summary = describeToolProposal({
+    tool: 'set_strategy',
+    args: {
+      strategic: 'Validar demanda B2B',
+      harnessIntentions: [{ harnessType: 'b2b', body: 'Conseguir 5 leads' }],
+    },
+  });
+  assert.match(summary, /Validar demanda B2B/);
+  assert.match(summary, /b2b: Conseguir 5 leads/);
 });

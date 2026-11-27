@@ -10,7 +10,12 @@
  * (la UI/modelo lo dice tal cual; no se inventan datos).
  */
 import { isHarnessType } from '@/convex/lib/harnessActivities';
-import { listOrchestrationAgents } from '@/src/lib/convexServer';
+import {
+  getSessionIntentions,
+  listOrchestrationAgents,
+  setSessionHarnessIntention,
+  setSessionStrategy,
+} from '@/src/lib/convexServer';
 import { HarnessInputError, normalizeActivityInput } from '@/src/lib/harnessInput';
 import {
   assignHarnessActivity,
@@ -32,6 +37,7 @@ export type AgentToolOutcome =
 
 const MAX_ITEMS = 20;
 const STALE_MS = 60_000;
+const MAX_INTENTION_CHARS = 600;
 const ACTIVITY_STATUSES = ['queued', 'running', 'completed', 'failed', 'blocked', 'cancelled'] as const;
 
 type ActivityStatus = (typeof ACTIVITY_STATUSES)[number];
@@ -199,7 +205,7 @@ async function getActivityResult(args: Record<string, unknown>, scopeHarness: st
 /** Ejecuta una tool de LECTURA ya validada por `parseToolCall`. Las de escritura se rechazan. */
 export async function executeAgentTool(
   call: ToolCall,
-  context: { sessionId: string; harnessType?: string | null }
+  context: { sessionId: string; harnessType?: string | null; agentKey?: string }
 ): Promise<AgentToolOutcome> {
   const def = getAgentTool(call.tool);
   if (!def) {
@@ -219,6 +225,24 @@ export async function executeAgentTool(
         const runId = asString(call.args.runId);
         if (!isSafeId(runId)) throw new Error('runId inválido o ausente.');
         return { tool: call.tool, ok: true, data: await runOverview(runId) };
+      }
+      case 'get_intentions':
+        return {
+          tool: call.tool,
+          ok: true,
+          data: await getSessionIntentions({ sessionId: context.sessionId }),
+        };
+      case 'get_my_intention': {
+        if (!context.harnessType) throw new Error('Solo un agente de arnés tiene intención particular.');
+        const all = await getSessionIntentions({ sessionId: context.sessionId });
+        return {
+          tool: call.tool,
+          ok: true,
+          data: {
+            strategic: all.strategic,
+            particular: all.harness[context.harnessType] ?? null,
+          },
+        };
       }
       case 'get_activity_result':
         return {
@@ -285,6 +309,20 @@ export function summarizeToolOutcome(outcome: AgentToolOutcome): string {
         .filter(Boolean)
         .join('\n');
     }
+    case 'get_intentions': {
+      const entries = Object.entries(data.harness ?? {});
+      return [
+        `Intención general: ${data.strategic ?? 'sin definir'}`,
+        entries.length
+          ? `Particulares:\n${entries.map(([harness, body]) => `- ${harness}: ${body}`).join('\n')}`
+          : 'Sin intenciones particulares.',
+      ].join('\n');
+    }
+    case 'get_my_intention':
+      return [
+        `Intención general: ${data.strategic ?? 'sin definir'}`,
+        `Tu intención particular: ${data.particular ?? 'sin definir'}`,
+      ].join('\n');
     case 'get_activity_result': {
       const preview = JSON.stringify(data.result ?? null);
       const short = preview.length > 1500 ? `${preview.slice(0, 1500)}…` : preview;
@@ -337,7 +375,7 @@ export function summarizeToolOutcome(outcome: AgentToolOutcome): string {
  */
 export async function executeConfirmedAgentTool(
   call: ToolCall,
-  context: { harnessType?: string | null } = {}
+  context: { sessionId: string; harnessType?: string | null; agentKey?: string }
 ): Promise<AgentToolOutcome> {
   const def = getAgentTool(call.tool);
   if (!def) {
@@ -349,6 +387,62 @@ export async function executeConfirmedAgentTool(
 
   try {
     switch (call.tool) {
+      case 'set_strategy': {
+        if (context.harnessType) throw new Error('Solo el orquestador define la intención general.');
+        const strategicRaw = asString(call.args.strategic, MAX_INTENTION_CHARS);
+        const entriesRaw = Array.isArray(call.args.harnessIntentions) ? call.args.harnessIntentions : [];
+        const harnessIntentions: Array<{ harnessType: string; body: string }> = [];
+        for (const entry of entriesRaw) {
+          if (!entry || typeof entry !== 'object') continue;
+          const record = entry as Record<string, unknown>;
+          const harnessType = asString(record.harnessType, 40);
+          const body = asString(record.body, MAX_INTENTION_CHARS);
+          if (!isHarnessType(harnessType)) throw new Error('harnessIntentions incluye un arnés inválido.');
+          if (!body) throw new Error(`La intención de ${harnessType} está vacía.`);
+          if (!harnessIntentions.some((item) => item.harnessType === harnessType)) {
+            harnessIntentions.push({ harnessType, body });
+          }
+        }
+        if (!strategicRaw && harnessIntentions.length === 0) {
+          throw new Error('Falta strategic o harnessIntentions.');
+        }
+        const result = await setSessionStrategy({
+          sessionId: context.sessionId,
+          ...(strategicRaw ? { strategic: strategicRaw } : {}),
+          ...(harnessIntentions.length ? { harnessIntentions } : {}),
+          source: 'orchestrator',
+          updatedBy: context.agentKey,
+        });
+        return { tool: call.tool, ok: true, data: result };
+      }
+      case 'set_harness_intention': {
+        if (context.harnessType) throw new Error('Solo el orquestador cambia la intención de otro arnés.');
+        const harnessType = asString(call.args.harnessType, 40);
+        const body = asString(call.args.body, MAX_INTENTION_CHARS);
+        if (!isHarnessType(harnessType)) throw new Error('harnessType inválido.');
+        if (!body) throw new Error('La intención no puede estar vacía.');
+        const result = await setSessionHarnessIntention({
+          sessionId: context.sessionId,
+          harnessType,
+          body,
+          source: 'orchestrator',
+          updatedBy: context.agentKey,
+        });
+        return { tool: call.tool, ok: true, data: result };
+      }
+      case 'set_my_intention': {
+        if (!context.harnessType) throw new Error('Solo un agente de arnés tiene intención propia.');
+        const body = asString(call.args.body, MAX_INTENTION_CHARS);
+        if (!body) throw new Error('La intención no puede estar vacía.');
+        const result = await setSessionHarnessIntention({
+          sessionId: context.sessionId,
+          harnessType: context.harnessType,
+          body,
+          source: 'harness',
+          updatedBy: context.agentKey,
+        });
+        return { tool: call.tool, ok: true, data: result };
+      }
       case 'assign_activity': {
         const requestedHarness = asString(call.args.harnessType, 40);
         if (context.harnessType) {
@@ -427,6 +521,19 @@ export function summarizeConfirmedToolOutcome(outcome: AgentToolOutcome): string
 
   const data = outcome.data as any;
   switch (outcome.tool) {
+    case 'set_strategy': {
+      const entries = Object.entries(data.harness ?? {});
+      return [
+        `Intención general actualizada: ${data.strategic ?? '—'}`,
+        entries.length ? `Particulares (${entries.length}): ${entries.map(([h]) => h).join(', ')}.` : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+    case 'set_harness_intention':
+      return `Intención de \`${data.harnessType}\` actualizada: ${data.body}`;
+    case 'set_my_intention':
+      return `Mi intención actualizada: ${data.body}`;
     case 'assign_activity':
       return [
         `Actividad encolada: \`${data.activity}\` en el arnés \`${data.harnessType}\`.`,

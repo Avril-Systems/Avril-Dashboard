@@ -95,6 +95,30 @@ export function describeToolProposal(call: ToolCall): string {
         args.input !== undefined ? `\n- Input: ${JSON.stringify(args.input).slice(0, 800)}` : '\n- Input: (defaults del catálogo)';
       return `Asignar la actividad \`${activity}\` al arnés \`${harness}\`${title}.${input}`;
     }
+    case 'set_strategy': {
+      const strategic = typeof args.strategic === 'string' ? args.strategic.trim() : '';
+      const entries = Array.isArray(args.harnessIntentions) ? args.harnessIntentions : [];
+      const lines = entries
+        .map((entry: any) =>
+          entry && typeof entry === 'object' && typeof entry.harnessType === 'string'
+            ? `- ${entry.harnessType}: ${String(entry.body ?? '').slice(0, 200)}`
+            : ''
+        )
+        .filter(Boolean)
+        .join('\n');
+      return [`Intención general: ${strategic || '(sin cambio)'}`, lines ? `Particulares:\n${lines}` : '']
+        .filter(Boolean)
+        .join('\n');
+    }
+    case 'set_harness_intention': {
+      const harness = typeof args.harnessType === 'string' ? args.harnessType : '?';
+      const body = typeof args.body === 'string' ? args.body.trim() : '';
+      return `Actualizar intención de \`${harness}\`: ${body || '(vacía)'}`;
+    }
+    case 'set_my_intention': {
+      const body = typeof args.body === 'string' ? args.body.trim() : '';
+      return `Actualizar mi intención: ${body || '(vacía)'}`;
+    }
     case 'request_control': {
       const runId = typeof args.runId === 'string' ? args.runId : '?';
       const agentKey = typeof args.agentKey === 'string' ? args.agentKey : '?';
@@ -163,6 +187,27 @@ export function buildToolInstructions(
     '- Nunca inventes cifras, estados, runIds ni resultados. Si la herramienta falla, dilo tal cual.',
     '- Para acciones destructivas (kill/stop) o que crean runs, explica qué hará la propuesta y deja que el operador confirme.'
   );
+
+  const names = new Set(tools.map((tool) => tool.name));
+  if (names.has('set_strategy') || names.has('set_my_intention')) {
+    sections.push(
+      '',
+      'Intención estratégica (texto breve, ≤600 caracteres; no es una orden de ejecución):',
+      ...(names.has('set_strategy')
+        ? [
+            '- Usa `set_strategy` cuando el usuario defina o cambie la intención general; deriva en la misma llamada una intención breve para cada arnés.',
+            '- Usa `set_harness_intention` para cambiar una intención particular concreta.',
+            '- Si el usuario pide cambiar la intención, responde SOLO con el bloque de herramienta; no la cambies solo en texto ni digas que la actualizaste sin ejecutarla.',
+          ]
+        : []),
+      ...(names.has('set_my_intention')
+        ? ['- Usa `set_my_intention` solo si el usuario te pide explícitamente cambiar tu intención.',
+           '- Si te la pide, responde SOLO con el bloque de herramienta; no confirmes el cambio en texto sin ejecutarlo.',
+           '- Tu intención particular está en el prompt; decide libremente cómo cumplirla con tus herramientas.']
+        : []),
+      '- No conviertas la intención en un plan rígido ni exijas evidencia: es rumbo, no una tarea cerrada.'
+    );
+  }
 
   return sections.join('\n');
 }

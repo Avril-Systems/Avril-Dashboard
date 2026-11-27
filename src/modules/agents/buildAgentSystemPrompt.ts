@@ -18,6 +18,11 @@ export type AgentPromptContext = {
   companyName?: string;
   /** Tools de lectura disponibles (solo orquestador en S02a). */
   tools?: AgentToolDef[];
+  /** Intención persistida de la sesión (general) y particulares por arnés. */
+  intentions?: {
+    strategic?: string | null;
+    harness?: Record<string, string>;
+  } | null;
 };
 
 function bullets(items: string[]): string {
@@ -74,6 +79,30 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Un pause/stop es una SOLICITUD; solo cuenta como confirmado cuando llega `agent.paused` / `agent.stopped`.',
     '- El origen de un dato (MOCK / REAL / sin origen) nunca se maquilla.',
     ...(sessionLines.length ? ['', 'Sesión actual:', bullets(sessionLines)] : []),
+    ...(context.intentions
+      ? [
+          '',
+          'Intención estratégica de la sesión (vigente; prevalece sobre el historial):',
+          context.intentions.strategic?.trim() || 'Sin definir.',
+          'Si el historial menciona una intención distinta, prevalece este bloque.',
+          ...(persona.harnessType
+            ? [
+                '',
+                'Tu intención particular (vigente):',
+                context.intentions.harness?.[persona.harnessType]?.trim() ||
+                  'Sin definir; pídela al orquestador o propone una.',
+              ]
+            : [
+                '',
+                'Intenciones particulares vigentes de los arneses:',
+                Object.keys(context.intentions.harness ?? {}).length
+                  ? Object.entries(context.intentions.harness ?? {})
+                      .map(([harness, body]) => `- ${harness}: ${body}`)
+                      .join('\n')
+                  : 'Sin definir.',
+              ]),
+        ]
+      : []),
     ...(context.tools && context.tools.length
       ? ['', buildToolInstructions(context.tools, { harnessType: persona.harnessType })]
       : []),
@@ -85,6 +114,9 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Cuando una petición requiera ejecución real, di qué actividad asignar (arnés + nombre exacto del catálogo) y con qué input; no afirmes que ya se ejecutó.',
     '- Si piden JSON, entrégalo; por defecto no envuelvas la respuesta en bloques JSON.',
     '- Si el pedido no corresponde a tu arnés, dilo y sugiere a quién derivarlo.',
+    persona.harnessType
+      ? '- Tu intención particular marca el rumbo; tienes libertad para decidir cómo cumplirla con tus herramientas. Si el usuario te pide cambiarla, responde solo con el bloque de `set_my_intention` (el servidor es la única fuente).'
+      : '- Cuando el usuario defina o cambie la intención general, usa `set_strategy` y deriva intenciones breves para los arneses; usa `set_harness_intention` para una particular concreta.',
     '',
     'Metacognición (obligatoria):',
     '- Distingue explícitamente lo que consultaste con una herramienta de lo que infieres.',
@@ -102,4 +134,29 @@ const AGENT_REPLY_IN_USER_LANGUAGE_TAIL =
 
 export function augmentAgentMessageForModel(message: string): string {
   return message + AGENT_REPLY_IN_USER_LANGUAGE_TAIL;
+}
+
+/** Recordatorio compacto de intenciones para insertarlo al final del contexto. */
+export function buildIntentionReminder(
+  identity: ResolvedAgentIdentity,
+  intentions: AgentPromptContext['intentions']
+): string | null {
+  if (!intentions) return null;
+  const lines = ['Intenciones vigentes (prevalecen sobre el historial):'];
+  lines.push(`General: ${intentions.strategic?.trim() || 'sin definir'}`);
+  if (identity.persona.harnessType) {
+    lines.push(
+      `Tu intención particular: ${
+        intentions.harness?.[identity.persona.harnessType]?.trim() || 'sin definir'
+      }`
+    );
+  } else {
+    const entries = Object.entries(intentions.harness ?? {});
+    lines.push(
+      entries.length
+        ? `Particulares: ${entries.map(([harness, body]) => `${harness}: ${body}`).join(' | ')}`
+        : 'Particulares: sin definir'
+    );
+  }
+  return lines.join('\n');
 }

@@ -1,3 +1,7 @@
+> **Nota (punto 5):** este router determinista por regex fue **retirado**. El LLM decide las
+> herramientas y la intención estratégica vive en `intentions` (ver
+> `docs/STRATEGIC_INTENTION.md`). Este documento queda como histórico.
+
 # S05 — Intención: el orquestador actúa sin depender del modelo
 
 Estado: implementado y verificado en local. Cierra la dependencia de que Venice emita (o no)
