@@ -298,8 +298,6 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
   const [showChat, setShowChat] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
 
-  const chatIdParam = useSearchParams().get('chatId')?.trim() || '';
-  const resolvedChatId = session?.chatId || chatIdParam;
   const authHeaders = useAuthHeaders();
 
   useEffect(() => {
@@ -523,21 +521,19 @@ useEffect(() => {
             
            <HandoffChainPanel events={events} />
            <HarnessPanel agents={agents} />
-           {resolvedChatId && (
-              <div className="shrink-0">
-                <OfficeAgentChat
-                  agents={agents.map((a) => ({
-                    agentKey: a.agentKey,
-                    name: a.name,
-                    role: a.role,
-                    status: a.status,
-                  }))}
-                  chatId={resolvedChatId}
-                  selectedAgentKey={selectedAgentKey}
-                  onSelectAgent={setSelectedAgentKey}
-                />
-              </div>
-            )}
+           <div className="shrink-0">
+             <OfficeAgentChat
+               agents={agents.map((a) => ({
+                 agentKey: a.agentKey,
+                 name: a.name,
+                 role: a.role,
+                 status: a.status,
+               }))}
+               sessionId={sessionId}
+               selectedAgentKey={selectedAgentKey}
+               onSelectAgent={setSelectedAgentKey}
+             />
+           </div>
 
             
           </div>

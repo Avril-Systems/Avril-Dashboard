@@ -308,6 +308,42 @@ export async function listOrchestrationSessions(args?: { organizationId?: string
   });
 }
 
+/** Identidad canónica de un agente de orquestación (la dueña de su conversación). */
+export type AgentChatAgent = {
+  agentKey: string;
+  name: string;
+  role: string | null;
+  meta: unknown;
+};
+
+/** Chat 1:1 existente de un agente (o null). */
+export async function getAgentChat(args: {
+  sessionId: string;
+  agentKey: string;
+}): Promise<{ chatId: string | null; agent: AgentChatAgent } | null> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query('serverAgentChats:getAgentChatServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  });
+}
+
+/** Chat 1:1 del agente, creándolo si es la primera vez. */
+export async function getOrCreateAgentChat(args: {
+  sessionId: string;
+  agentKey: string;
+}): Promise<{ chatId: string; agent: AgentChatAgent }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:getOrCreateAgentChatServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  });
+}
+
 export async function getControlPlaneState(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();

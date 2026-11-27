@@ -223,9 +223,21 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
     agentId: v.optional(v.id('agents')),
+    /**
+     * 'architect' = entrevista de founder con Avril (legacy: undefined).
+     * 'agent' = conversación 1:1 con un agente del Agent Office.
+     */
+    kind: v.optional(v.union(v.literal('architect'), v.literal('agent'))),
+    /** Solo en kind='agent': sesión de orquestación y agentKey dueños de esta conversación. */
+    orchestrationSessionId: v.optional(v.id('orchestrationSessions')),
+    agentKey: v.optional(v.string()),
     summary: v.optional(v.string()),
     summaryUpdatedAt: v.optional(v.string()),
-  }).index('by_org', ['organizationId']).index('by_updatedAt', ['updatedAt']).index('by_agent', ['agentId']),
+  })
+    .index('by_org', ['organizationId'])
+    .index('by_updatedAt', ['updatedAt'])
+    .index('by_agent', ['agentId'])
+    .index('by_session_agent', ['orchestrationSessionId', 'agentKey']),
   messages: defineTable({ chatId: v.id('chats'), authorType: v.union(v.literal('human'), v.literal('agent')), authorId: v.string(), content: v.string(), createdAt: v.string() }).index('by_chat', ['chatId']),
   /** Latest Avril chat → ignition export for this thread (full demo path). */
   chatIgnitionDrafts: defineTable({

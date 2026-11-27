@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, rejectLargePayload, requireDashboardToken } from '@/src/lib/apiSecurity';
 import {
   getDefaultOrganizationId,
+  getOrCreateAgentChat,
   listChats,
   listMessages,
   sendMessage,
@@ -13,6 +14,12 @@ import {
   augmentUserMessageForModel,
   buildAvrilUnifiedSystemPrompt,
 } from '@/src/modules/avril/buildAvrilSystemPrompt';
+import {
+  augmentAgentMessageForModel,
+  buildAgentSystemPrompt,
+} from '@/src/modules/agents/buildAgentSystemPrompt';
+import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
+import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import { parseAvrilAssistantReply } from '@/src/modules/avril/parseAvrilAssistantReply';
 import { extractDraftFromArchitectPayload } from '@/src/modules/avril/extractDraftFromArchitectPayload';
 import { isFolderAgentBriefMessage } from '@/src/lib/orchestrationSwarmGuardrails';
@@ -32,11 +39,18 @@ const MAX_AGENT_BRIEF_CHARS = 56 * 1024;
 const RESPOND_MAX_BODY_BYTES = 128 * 1024;
 
 type RequestBody = {
-  chatId: string;
+  /** Architect mode: the founder chat. */
+  chatId?: string;
+  /** Agent mode: session + agentKey identify the 1:1 agent conversation (chatId is resolved server-side). */
+  sessionId?: string;
+  agentKey?: string;
   message: string;
   organizationId?: string;
-  model?: 'codex' | 'opus' | 'venice';
+  /** `mock` solo existe en modo agente y solo fuera de producción (pruebas de plumbing). */
+  model?: 'codex' | 'opus' | 'venice' | 'mock';
 };
+
+type PromptMode = 'architect' | 'agent';
 
 type ApiErrorCode =
   | 'UNAUTHORIZED'
@@ -45,6 +59,8 @@ type ApiErrorCode =
   | 'BAD_REQUEST'
   | 'CONFIG_ERROR'
   | 'CHAT_NOT_FOUND'
+  | 'AGENT_NOT_FOUND'
+  | 'AGENT_CHAT_FAILED'
   | 'CONVEX_ERROR'
   | 'BRIDGE_TIMEOUT'
   | 'BRIDGE_ERROR'
@@ -79,6 +95,7 @@ function errorResponse(
 type BridgeInput = {
   chatId: string;
   message: string;
+  mode?: PromptMode;
   model?: 'codex' | 'opus' | 'venice';
   agentId?: string;
   area?: string;
@@ -86,13 +103,41 @@ type BridgeInput = {
   summary?: string;
   messages?: Array<{ authorType: string; authorId: string; content: string; createdAt: string }>;
   maxContextChars?: number;
-  /** Full Avril architect system prompt (shared Venice + OpenClaw). */
+  /** System prompt: Avril architect (founder flow) or the targeted agent's persona. */
   systemPrompt?: string;
 };
 
 type VeniceResult =
   | { ok: true; text: string }
   | { ok: false; code: 'VENICE_TIMEOUT' | 'VENICE_ERROR'; message: string; retryable: boolean };
+
+function augmentForMode(mode: PromptMode | undefined, message: string): string {
+  return mode === 'agent' ? augmentAgentMessageForModel(message) : augmentUserMessageForModel(message);
+}
+
+/**
+ * Respuesta de pruebas (solo dev, solo modo agente): valida identidad, hilo por
+ * agente y persistencia sin llamar a Venice ni al bridge. Nunca se presenta como
+ * respuesta real: el texto va marcado como MOCK.
+ */
+function buildMockAgentReply(
+  identity: ResolvedAgentIdentity | null,
+  message: string,
+  historyCount: number
+): string {
+  const name = identity?.name ?? 'Agente';
+  const key = identity?.agentKey ?? 'desconocido';
+  const harness = identity?.persona.harnessType ?? 'sin arnés (orquestador)';
+  return [
+    '[MOCK · respuesta simulada, sin modelo real]',
+    '',
+    `Soy **${name}** (\`${key}\`). Arnés: ${harness}.`,
+    `Mensaje recibido: “${message.slice(0, 500)}”`,
+    `Mensajes previos en este hilo: ${historyCount}.`,
+    '',
+    'Esto valida identidad, hilo por agente y persistencia. No valida Venice ni el bridge.',
+  ].join('\n');
+}
 
 function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const base = input.systemPrompt?.trim() || buildAvrilUnifiedSystemPrompt();
@@ -111,7 +156,7 @@ function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user
     { role: 'system', content: systemMain },
     ...(input.summary ? [{ role: 'system' as const, content: `Conversation summary: ${input.summary}` }] : []),
     ...fromContext,
-    { role: 'user', content: augmentUserMessageForModel(input.message) },
+    { role: 'user', content: augmentForMode(input.mode, input.message) },
   ];
 }
 
@@ -248,7 +293,7 @@ async function callOpenClawBridge(input: BridgeInput): Promise<BridgeResult> {
           Authorization: `Bearer ${bridgeToken}`,
         },
         body: JSON.stringify({
-          message: augmentUserMessageForModel(input.message),
+          message: augmentForMode(input.mode, input.message),
           model: input.model ?? 'codex',
           source: 'avril-dashboard',
           chatId: input.chatId,
@@ -356,11 +401,18 @@ export async function POST(req: Request) {
       return errorResponse(400, 'BAD_REQUEST', 'Invalid JSON body.');
     }
 
-    const chatId = body.chatId?.trim();
+    const chatIdFromBody = body.chatId?.trim();
+    const sessionId = body.sessionId?.trim();
+    const agentKey = body.agentKey?.trim();
+    const agentTarget = sessionId && agentKey ? { sessionId, agentKey } : null;
     const message = body.message?.trim();
 
-    if (!chatId || !message) {
-      return errorResponse(400, 'BAD_REQUEST', 'chatId and message are required.');
+    if ((!chatIdFromBody && !agentTarget) || !message) {
+      return errorResponse(
+        400,
+        'BAD_REQUEST',
+        'chatId, or sessionId + agentKey, and message are required.'
+      );
     }
 
     if (message.length > MAX_AGENT_BRIEF_CHARS) {
@@ -374,27 +426,84 @@ export async function POST(req: Request) {
       );
     }
 
-    let existingChats: any[];
-    try {
-      existingChats = await listChats({ organizationId: body.organizationId });
-    } catch (err) {
-      return errorResponse(502, 'CONVEX_ERROR', 'Failed to validate chat against Convex.', {
-        retryable: true,
-        details: err instanceof Error ? err.message : String(err),
+    /**
+     * Dos modos sobre el mismo endpoint:
+     *   - agent:     conversación 1:1 con un agente del Agent Office. El chat se resuelve
+     *                en el servidor por (sessionId, agentKey); el cliente no puede elegirlo.
+     *   - architect: flujo Avril de siempre (entrevista founder + ignition draft), sin cambios.
+     */
+    const mode: PromptMode = agentTarget ? 'agent' : 'architect';
+
+    let chatId: string;
+    let systemPrompt: string;
+    let agentAuthorId: string | undefined;
+    let agentId: string | undefined;
+    let area: string | undefined;
+    let subArea: string | undefined;
+    let hasSummary = false;
+    let summaryText: string | undefined;
+    let agentIdentity: ResolvedAgentIdentity | null = null;
+
+    if (agentTarget) {
+      let resolved: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
+      try {
+        resolved = await getOrCreateAgentChat(agentTarget);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const notFound = /unknown agent/i.test(detail);
+        return errorResponse(
+          notFound ? 404 : 502,
+          notFound ? 'AGENT_NOT_FOUND' : 'AGENT_CHAT_FAILED',
+          notFound ? 'Unknown agent for this session.' : 'Failed to resolve the agent conversation.',
+          { retryable: !notFound, details: detail }
+        );
+      }
+
+      chatId = resolved.chatId;
+      agentAuthorId = resolved.agent.agentKey;
+      const identity = resolveAgentIdentity({
+        agentKey: resolved.agent.agentKey,
+        name: resolved.agent.name,
+        role: resolved.agent.role,
+        meta: resolved.agent.meta,
       });
-    }
+      systemPrompt = buildAgentSystemPrompt(identity, { sessionId });
+      agentIdentity = identity;
+    } else {
+      const requestedChatId = chatIdFromBody as string;
 
-    if (!Array.isArray(existingChats) || !existingChats.some((c: any) => c?._id === chatId)) {
-      return errorResponse(400, 'CHAT_NOT_FOUND', 'Invalid chatId. The selected chat no longer exists.');
-    }
+      let existingChats: any[];
+      try {
+        existingChats = await listChats({ organizationId: body.organizationId });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'Failed to validate chat against Convex.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
 
-    const currentChat = existingChats.find((c: any) => c?._id === chatId) as
-      | { _id: string; agentId?: string; agent?: { name: string; area?: string; subArea?: string }; summary?: string; summaryUpdatedAt?: string }
-      | undefined;
-    const agentId = currentChat?.agentId;
-    const area = currentChat?.agent?.area;
-    const subArea = currentChat?.agent?.subArea;
-    const hasSummary = Boolean(currentChat?.summary?.trim());
+      if (!Array.isArray(existingChats) || !existingChats.some((c: any) => c?._id === requestedChatId)) {
+        return errorResponse(400, 'CHAT_NOT_FOUND', 'Invalid chatId. The selected chat no longer exists.');
+      }
+
+      const currentChat = existingChats.find((c: any) => c?._id === requestedChatId) as
+        | {
+            _id: string;
+            agentId?: string;
+            agent?: { name: string; area?: string; subArea?: string };
+            summary?: string;
+            summaryUpdatedAt?: string;
+          }
+        | undefined;
+
+      chatId = requestedChatId;
+      agentId = currentChat?.agentId;
+      area = currentChat?.agent?.area;
+      subArea = currentChat?.agent?.subArea;
+      hasSummary = Boolean(currentChat?.summary?.trim());
+      summaryText = hasSummary ? currentChat?.summary?.trim() : undefined;
+      systemPrompt = buildAvrilUnifiedSystemPrompt();
+    }
 
     try {
       await sendMessage({ chatId, content: message });
@@ -408,8 +517,13 @@ export async function POST(req: Request) {
     let contextMessages: NonNullable<BridgeInput['messages']> = [];
     try {
       const allMessages = await listMessages({ chatId });
+      // El mensaje actual ya se persistió arriba: no lo mandes otra vez como contexto.
+      const history =
+        allMessages.length > 0 && allMessages[allMessages.length - 1]?.content === message
+          ? allMessages.slice(0, -1)
+          : allMessages;
       const limit = hasSummary ? BRIDGE_CONTEXT_LAST_N_WHEN_SUMMARY : BRIDGE_CONTEXT_LAST_N;
-      const lastN = allMessages.slice(-limit).map((m: any) => {
+      const lastN = history.slice(-limit).map((m: any) => {
         const content = String(m.content ?? '').trim();
         const truncated =
           content.length <= BRIDGE_CONTEXT_MAX_CONTENT_CHARS
@@ -427,22 +541,33 @@ export async function POST(req: Request) {
       // Proceed without context if listing fails
     }
 
-    const architectPrompt = buildAvrilUnifiedSystemPrompt();
     const input: BridgeInput = {
       chatId,
       message,
-      model: body.model,
+      mode,
+      model: body.model === 'mock' ? undefined : body.model,
       agentId,
       area,
       subArea,
-      systemPrompt: architectPrompt,
-      ...(hasSummary && currentChat?.summary && { summary: currentChat.summary.trim() }),
+      systemPrompt,
+      ...(summaryText ? { summary: summaryText } : {}),
       messages: contextMessages.length > 0 ? contextMessages : undefined,
       maxContextChars: BRIDGE_CONTEXT_MAX_CHARS,
     };
 
-    const result =
-      body.model === 'venice' ? await callVeniceInference(input) : await callOpenClawBridge(input);
+    const wantsMock = body.model === 'mock';
+    if (wantsMock && mode !== 'agent') {
+      return errorResponse(400, 'BAD_REQUEST', 'El modelo mock solo existe en modo agente.');
+    }
+    if (wantsMock && process.env.NODE_ENV === 'production') {
+      return errorResponse(400, 'BAD_REQUEST', 'El modelo mock está deshabilitado en producción.');
+    }
+
+    const result = wantsMock
+      ? { ok: true as const, text: buildMockAgentReply(agentIdentity, message, contextMessages.length) }
+      : body.model === 'venice'
+        ? await callVeniceInference(input)
+        : await callOpenClawBridge(input);
 
     if (!result.ok) {
       return errorResponse(502, result.code, result.message, {
@@ -451,10 +576,16 @@ export async function POST(req: Request) {
       });
     }
 
-    const { displayText, architectPayload } = parseAvrilAssistantReply(result.text);
+    // En modo agente la respuesta es texto plano: no hay payload de arquitecto ni ignición.
+    const parsed =
+      mode === 'agent'
+        ? { displayText: result.text.trim(), architectPayload: null as Record<string, unknown> | null }
+        : parseAvrilAssistantReply(result.text);
+    const displayText = parsed.displayText;
+    const architectPayload = parsed.architectPayload;
 
     try {
-      await sendAgentMessage({ chatId, content: displayText, authorId: 'AvrilAgent' });
+      await sendAgentMessage({ chatId, content: displayText, authorId: agentAuthorId ?? 'AvrilAgent' });
     } catch (err) {
       return errorResponse(502, 'CONVEX_ERROR', 'Agent reply received but failed to persist.', {
         retryable: true,
@@ -463,7 +594,7 @@ export async function POST(req: Request) {
     }
 
     let ignitionReady = false;
-    if (architectPayload !== null) {
+    if (mode === 'architect' && architectPayload !== null) {
       const extracted = extractDraftFromArchitectPayload(architectPayload);
       if (extracted) {
         ignitionReady = extracted.nextStatus === 'ready';
@@ -485,7 +616,7 @@ export async function POST(req: Request) {
       }
     }
 
-    if (isFolderAgentBriefMessage(message)) {
+    if (mode === 'architect' && isFolderAgentBriefMessage(message)) {
       try {
         const organizationId = body.organizationId?.trim() || (await getDefaultOrganizationId());
         const capturedFromJson =
@@ -558,8 +689,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      mode,
+      chatId,
+      ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
       reply: displayText,
-      ...(architectPayload !== null ? { architectPayload } : {}),
+      ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),
     });
   } catch (err) {

@@ -57,7 +57,11 @@ export const listChats = query({
       .withIndex('by_org', (q) => q.eq('organizationId', organizationId))
       .collect();
 
-    const sorted = chats.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50);
+    // Las conversaciones por agente (kind='agent') viven en Agent Office, no en este listado.
+    const sorted = chats
+      .filter((chat) => chat.kind !== 'agent')
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 50);
 
     const withLastMessage = await Promise.all(
       sorted.map(async (chat) => {

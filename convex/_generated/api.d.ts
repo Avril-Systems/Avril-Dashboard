@@ -20,6 +20,7 @@ import type * as lib_companyDisplayName from "../lib/companyDisplayName.js";
 import type * as lib_founderPrompts from "../lib/founderPrompts.js";
 import type * as lib_harnessActivities from "../lib/harnessActivities.js";
 import type * as lib_venice from "../lib/venice.js";
+import type * as serverAgentChats from "../serverAgentChats.js";
 import type * as serverChatIgnition from "../serverChatIgnition.js";
 import type * as serverChats from "../serverChats.js";
 import type * as serverControlPlane from "../serverControlPlane.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "lib/founderPrompts": typeof lib_founderPrompts;
   "lib/harnessActivities": typeof lib_harnessActivities;
   "lib/venice": typeof lib_venice;
+  serverAgentChats: typeof serverAgentChats;
   serverChatIgnition: typeof serverChatIgnition;
   serverChats: typeof serverChats;
   serverControlPlane: typeof serverControlPlane;
