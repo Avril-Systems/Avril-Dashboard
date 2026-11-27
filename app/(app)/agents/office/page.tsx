@@ -401,6 +401,12 @@ useEffect(() => {
                 {session.status}
               </span>
             )}
+            <Link
+              href="/agents/swarmy"
+              className="rounded-full border border-border/70 bg-surface/60 px-3 py-1 text-xs font-heading text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Runs
+            </Link>
             <button
               type="button"
               onClick={() => setShowDebug((v) => !v)}

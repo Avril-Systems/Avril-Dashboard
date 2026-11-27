@@ -1,8 +1,8 @@
 // Worker externo de Staging para Swarmy (W46 P0 - Actividades 4, 5 y 6)
-// Ejecutar: node script/swarmy-staging-worker.mjs
+// DEMO/LEGACY (no operativo). Ejecutar: node script/demo/swarmy-staging-worker.mjs
 
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "../convex/_generated/api.js";
+import { api } from "../../convex/_generated/api.js";
 
 // Cargar variables de .env.local si existe (Node >= 20.12 / 22+)
 try {

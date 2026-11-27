@@ -2,7 +2,7 @@
 // Todo lleva isMock:true y el runId empieza con "run_mock_": no finge ejecución real.
 //
 // Uso (desde la raíz del repo, con el código de Alejandro ya desplegado en tu Convex de desarrollo):
-//   node --env-file=.env.local script/swarmy-mock-cycle.mjs [escenario] [--dry-run] [--keepalive]
+//   node --env-file=.env.local script/demo/swarmy-mock-cycle.mjs [escenario] [--dry-run] [--keepalive]
 //
 // Escenarios:
 //   chain               (por defecto) cadena completa de 7 pasos + latidos de los 4 harnesses

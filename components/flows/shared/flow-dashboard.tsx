@@ -2,10 +2,8 @@
 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Activity, Bot, DollarSign, Shield } from 'lucide-react';
 import { useLanguage } from '@/components/marketing/language-context';
 import { MarketingBrandButton } from '@/components/marketing/marketing-brand-button';
-import { GlassPanel } from '@/components/patterns/glass-panel';
 
 type FlowDashboardProps = {
   companyName: string;
@@ -14,19 +12,17 @@ type FlowDashboardProps = {
   onRestart: () => void;
 };
 
+/**
+ * Cierre del flujo de fundador. No muestra métricas: no hay datos reales de
+ * agentes/aprobaciones/health/ingresos en este punto. Solo confirma la sesión y
+ * lleva a las superficies reales (Agent Office y Runs).
+ */
 export function FlowDashboard({ companyName, ideaId, sessionId, onRestart }: FlowDashboardProps) {
   const { t } = useLanguage();
   const d = t.flow.dashboard;
   const dashboardHref = sessionId
     ? `/agents/office?sessionId=${encodeURIComponent(sessionId)}`
     : '/agents/office';
-
-  const stats = [
-    { label: d.stats.agents, value: '4', icon: Bot },
-    { label: d.stats.approvals, value: '2', icon: Shield },
-    { label: d.stats.health, value: '94%', icon: Activity },
-    { label: d.stats.revenue, value: '3', icon: DollarSign },
-  ];
 
   return (
     <motion.div
@@ -48,25 +44,11 @@ export function FlowDashboard({ companyName, ideaId, sessionId, onRestart }: Flo
         )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <GlassPanel key={stat.label} className="flex items-center gap-4 p-5 text-left">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-raised">
-                <Icon size={18} className="text-brand" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-widest text-muted-foreground">{stat.label}</p>
-                <p className="avril-stat-value text-2xl tabular-nums text-foreground">{stat.value}</p>
-              </div>
-            </GlassPanel>
-          );
-        })}
-      </div>
-
       <div className="flex flex-col items-center gap-3">
         <MarketingBrandButton label={d.cta} href={dashboardHref} />
+        <Link href="/agents/swarmy" className="text-sm text-brand hover:underline">
+          {d.runsCta}
+        </Link>
         <button type="button" onClick={onRestart} className="text-sm text-brand hover:underline">
           {d.restart}
         </button>

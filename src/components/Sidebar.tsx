@@ -37,9 +37,6 @@ const NAV_BASE: Array<{
 ];
 
 function isNavActive(pathname: string, href: string) {
-  if (href === '/agents') {
-    return pathname.startsWith('/agents') && !pathname.startsWith('/agents/office');
-  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

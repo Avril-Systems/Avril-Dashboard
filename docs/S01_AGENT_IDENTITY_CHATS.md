@@ -91,7 +91,9 @@ límites dejan explícito que:
 - Swarmy/Runs: `SwarmyPanels`, `serverOrchestration`, `swarmyServer`, worker, adaptadores.
 - Las duplicidades detectadas (`agents` vs `orchestrationAgents`, dos controles, dos alcances
   org vs tenant) **siguen intactas**: se resuelven en S04 con dependencias confirmadas.
-- `script/swarmy-staging-worker.mjs` y `swarmy-mock-cycle.mjs` no se tocan todavía.
+- `script/demo/swarmy-staging-worker.mjs` y `script/demo/swarmy-mock-cycle.mjs` se movieron a
+  `script/demo/` en S04
+  (demo/pruebas; no forman parte del flujo operativo).
 
 ## 7. Cambios por archivo
 
