@@ -346,7 +346,8 @@ export default defineSchema({
     updatedAt: v.string(),
   })
     .index('by_session_agent', ['sessionId', 'agentKey'])
-    .index('by_session', ['sessionId']),
+    .index('by_session', ['sessionId'])
+    .index('by_enabled', ['enabled']),
   /** Lecciones privadas por agente; histórico con retiro, nunca se reescribe. */
   metacognitionLessons: defineTable({
     sessionId: v.id('orchestrationSessions'),

@@ -661,6 +661,7 @@ export async function listMetacognitionExperience(args: {
   agentKey: string;
   since?: string | null;
   limit?: number;
+  tenantId?: string | null;
 }): Promise<MetacognitionExperienceRow[]> {
   const client = getClient();
   const serverSecret = requireServerSecret();
@@ -669,6 +670,7 @@ export async function listMetacognitionExperience(args: {
     agentKey: args.agentKey,
     ...(args.since ? { since: args.since } : {}),
     limit: args.limit ?? 12,
+    ...(args.tenantId ? { tenantId: args.tenantId } : {}),
     serverSecret,
   })) as MetacognitionExperienceRow[];
   return Array.isArray(rows) ? rows : [];

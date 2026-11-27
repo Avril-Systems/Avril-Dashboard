@@ -164,9 +164,8 @@ export const AGENT_TOOLS: AgentToolDef[] = [
   {
     name: 'set_my_intention',
     kind: 'write',
-    direct: true,
     description:
-      'Actualiza tu propia intención particular cuando el usuario te lo pida explícitamente. Texto breve (≤600 caracteres).',
+      'Propone cambiar tu propia intención particular cuando el usuario te lo pida. Requiere confirmación del operador; no se aplica en el turno. Texto breve (≤600 caracteres).',
     args: [{ name: 'body', type: 'string', required: true, description: 'Nueva intención breve.' }],
   },
 ];
@@ -188,13 +187,25 @@ const HARNESS_TOOL_NAMES: AgentToolName[] = [
   'set_my_intention',
 ];
 
-export function toolsForAgent(harnessType: string | null): AgentToolDef[] {
-  if (!harnessType) return AGENT_TOOLS;
-  return AGENT_TOOLS.filter((tool) => HARNESS_TOOL_NAMES.includes(tool.name));
+/** Tools que solo tienen sentido para un arnés (no para el orquestador). */
+const HARNESS_ONLY_TOOL_NAMES = new Set<AgentToolName>(['get_my_intention', 'set_my_intention']);
+
+export function toolsForAgent(
+  harnessType: string | null,
+  options: { authorized?: boolean; orchestrator?: boolean } = {}
+): AgentToolDef[] {
+  if (options.authorized === false) return [];
+  if (harnessType) return AGENT_TOOLS.filter((tool) => HARNESS_TOOL_NAMES.includes(tool.name));
+  if (options.orchestrator === false) return [];
+  return AGENT_TOOLS.filter((tool) => !HARNESS_ONLY_TOOL_NAMES.has(tool.name));
 }
 
-export function isToolAllowedForAgent(name: string, harnessType: string | null): boolean {
-  return toolsForAgent(harnessType).some((tool) => tool.name === name);
+export function isToolAllowedForAgent(
+  name: string,
+  harnessType: string | null,
+  options: { authorized?: boolean; orchestrator?: boolean } = {}
+): boolean {
+  return toolsForAgent(harnessType, options).some((tool) => tool.name === name);
 }
 
 /** Escritura de intención que se aplica en el turno (sin propuesta). */

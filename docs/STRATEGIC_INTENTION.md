@@ -31,11 +31,13 @@ cambiar de modelo. Una sesión nueva (otra empresa) empieza sin intención.
 | Orquestador | `set_strategy({ strategic, harnessIntentions[] })` | Define/actualiza la general y deriva las particulares en una sola llamada. |
 | Orquestador | `set_harness_intention({ harnessType, body })` | Intervención directa sobre una particular. |
 | Arnés | `get_my_intention` | Lee la general + su particular. |
-| Arnés | `set_my_intention({ body })` | Cambia su particular cuando el usuario lo pide. |
+| Arnés | `set_my_intention({ body })` | **Propone** cambiar su particular; requiere confirmación del operador. |
 
-Las tools de intención son **escrituras directas** (`direct: true`): el mensaje del usuario es
-la instrucción y no son acciones de negocio. Las acciones (`assign_activity`, `request_control`)
-siguen pasando por propuesta + confirmación (punto 2).
+Las tools del orquestador (`set_strategy`, `set_harness_intention`) son **escrituras directas**
+(`direct: true`): el usuario define la estrategia por conversación. `set_my_intention` de un
+arnés **no** es directa: crea una propuesta persistida que el operador debe confirmar; el arnés
+no puede aprobarla unilateralmente. Las acciones (`assign_activity`, `request_control`) siguen
+pasando por propuesta + confirmación (punto 2).
 
 ## Prompt y vigencia
 
@@ -53,11 +55,12 @@ persistida, no la vieja.
 | Persistencia | `GET /api/orchestration/intentions?sessionId=…` devuelve general y 4 particulares. |
 | Arnés conoce su intención | B2B respondió su particular desde su propio chat. |
 | Intervención directa | El orquestador cambió marketing con `set_harness_intention`; marketing leyó la nueva. |
-| El arnés edita la suya | Marketing usó `set_my_intention`; quedó persistida la nueva versión. |
+| El arnés propone la suya | Marketing emitió `set_my_intention`: `requiresConfirmation: true`; la intención no cambió. |
+| El operador aprueba | Tras confirmar la propuesta, la nueva intención de marketing quedó persistida. |
 | Cambio de modelo | B2B respondió su intención con `model:"venice"` (proveedor Venice) y con el genérico. |
 | Vigencia vs historial | El orquestador respondió la versión vigente de marketing (3 piezas), no la vieja del historial. |
 
-`typecheck` limpio, `agents:check` 36/36, lint solo warnings preexistentes. Sin despliegue a
+`typecheck` limpio, `agents:check` 38/38, lint solo warnings preexistentes. Sin despliegue a
 producción.
 
 ## Archivos
@@ -84,3 +87,12 @@ producción.
 - Sin planners rígidos, exigencias de evidencia, experimentos obligatorios ni ciclos de
   autocorrección.
 - No se desplegó a producción.
+
+
+## Seguridad de identidad
+
+- Solo el orquestador explícito (`role=orchestrator`, `meta.orchestrator` o `swarm-strategy`) y los
+  arneses registrados están autorizados. Un `agentKey` desconocido se rechaza con
+  `AGENT_NOT_AUTHORIZED`; no hereda la persona ni las tools del orquestador.
+- La confirmación de la propuesta de intención de un arnés requiere el endpoint de confirmación
+  del operador (token/sesión autorizada); el turno del arnés no puede confirmarla.

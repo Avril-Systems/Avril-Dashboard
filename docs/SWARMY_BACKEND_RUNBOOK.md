@@ -24,3 +24,20 @@
   `script/harness-adapters.mjs`. Sin worker, la actividad queda `queued`.
 
 Contrato, variables y evidencia real: [`SWARMY_ACTIVITIES.md`](./SWARMY_ACTIVITIES.md).
+
+
+## 4. Operadores y worker en producción
+
+- **Acceso Swarmy:** `DASHBOARD_APP_TOKEN` (automatización/ops) o sesión cuyo wallet esté en
+  `SWARMY_OPERATOR_WALLETS` (coma-separado). Sin allowlist, las sesiones no son operadoras y
+  reciben `403 OPERATOR_REQUIRED`. No se permite el bypass de demo.
+- **Worker:** ejecutar `npm run harness:worker` desde la raíz con `CONVEX_URL`,
+  `CONVEX_SERVER_SECRET`, `SWARMY_TENANT_ID`, `SWARMY_WORKSPACE_ID`, `GITHUB_TOKEN` (opcional) y
+  las claves de los adapters que se usen (`NVIDIA_API_KEY`, `BRAVE_API_KEY`, `ANTHROPIC_API_KEY`).
+  El intérprete Python sale de `HARNESS_PYTHON` o `.harness-venv/bin/python`.
+- **Scheduler de metacognición:** el mismo worker llama a
+  `${NEXT_PUBLIC_APP_URL|METACOGNITION_APP_URL}/api/orchestration/metacognition/run` con
+  `DASHBOARD_APP_TOKEN`, cada `METACOGNITION_INTERVAL_MS` (default 1 h; cadencia por agente 24 h).
+  Si faltan URL/token, el worker sigue ejecutando actividades y solo omite el scheduler.
+- **Convex:** `CONVEX_SERVER_SECRET` debe coincidir con el deployment de producción; no usar el
+  de dev. `npx convex deploy` es un paso aparte y no se ejecutó en esta rama.

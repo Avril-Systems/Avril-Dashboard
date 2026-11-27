@@ -96,6 +96,7 @@ type ApiErrorCode =
   | 'CONFIG_ERROR'
   | 'CHAT_NOT_FOUND'
   | 'AGENT_NOT_FOUND'
+  | 'AGENT_NOT_AUTHORIZED'
   | 'AGENT_CHAT_FAILED'
   | 'CONVEX_ERROR'
   | 'BRIDGE_TIMEOUT'
@@ -582,6 +583,7 @@ export async function POST(req: Request) {
       }
 
       let confirmHarness: string | null = null;
+      let confirmIdentity: ResolvedAgentIdentity | null = null;
       try {
         const agentChat = await getAgentChat({
           sessionId: claim.proposal.sessionId,
@@ -595,12 +597,13 @@ export async function POST(req: Request) {
           });
           return errorResponse(404, 'AGENT_NOT_FOUND', 'El agente de la propuesta ya no existe.');
         }
-        confirmHarness = resolveAgentIdentity({
+        confirmIdentity = resolveAgentIdentity({
           agentKey: agentChat.agent.agentKey,
           name: agentChat.agent.name,
           role: agentChat.agent.role,
           meta: agentChat.agent.meta,
-        }).persona.harnessType;
+        });
+        confirmHarness = confirmIdentity.persona.harnessType;
       } catch (err) {
         return errorResponse(502, 'CONVEX_ERROR', 'No se pudo verificar el agente de la propuesta.', {
           retryable: true,
@@ -608,7 +611,25 @@ export async function POST(req: Request) {
         });
       }
 
-      if (!isToolAllowedForAgent(def.name, confirmHarness)) {
+      if (!confirmIdentity?.persona.authorized) {
+        try {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'El agente no tiene identidad autorizada.',
+          });
+        } catch {
+          // el claim ya evitó duplicados
+        }
+        return errorResponse(403, 'AGENT_NOT_AUTHORIZED', 'El agente no tiene una identidad autorizada.');
+      }
+
+      if (
+        !isToolAllowedForAgent(def.name, confirmHarness, {
+          authorized: confirmIdentity.persona.authorized,
+          orchestrator: confirmIdentity.persona.kind === 'orchestrator',
+        })
+      ) {
         try {
           await finishAgentToolProposal({
             proposalId: claim.proposal._id,
@@ -763,8 +784,19 @@ export async function POST(req: Request) {
         role: resolved.agent.role,
         meta: resolved.agent.meta,
       });
+      if (!identity.persona.authorized) {
+        return errorResponse(
+          403,
+          'AGENT_NOT_AUTHORIZED',
+          'El agente no tiene una identidad autorizada en esta sesión.'
+        );
+      }
+
       // Punto 3: el orquestador ve todas las tools; cada arnés solo las suyas.
-      agentTools = toolsForAgent(identity.persona.harnessType);
+      agentTools = toolsForAgent(identity.persona.harnessType, {
+        authorized: identity.persona.authorized,
+        orchestrator: identity.persona.kind === 'orchestrator',
+      });
 
       // Intención persistida (se relee en cada turno; sobrevive a chats y cambios de modelo).
       let sessionIntentions: Awaited<ReturnType<typeof getSessionIntentions>> | null = null;
@@ -951,8 +983,12 @@ export async function POST(req: Request) {
       if (parsedCall.kind === 'call') {
         const callDef = getAgentTool(parsedCall.call.tool);
         const harnessScope = agentIdentity?.persona.harnessType ?? null;
+        const toolScope = {
+          authorized: agentIdentity?.persona.authorized ?? false,
+          orchestrator: agentIdentity?.persona.kind === 'orchestrator',
+        };
 
-        if (!callDef || !isToolAllowedForAgent(callDef.name, harnessScope)) {
+        if (!callDef || !isToolAllowedForAgent(callDef.name, harnessScope, toolScope)) {
           agentFinalText = 'Esa herramienta no está disponible para este agente.';
         } else if (callDef.kind === 'write') {
           if (callDef.direct) {

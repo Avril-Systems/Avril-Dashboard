@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AGENT_TOOLS,
+  isDirectWrite,
   isToolAllowedForAgent,
   isWriteTool,
   toolsForAgent,
@@ -105,10 +106,15 @@ test('buildToolInstructions separa lectura y escritura', () => {
   assert.match(prompt, /confirmación/i);
 });
 
-test('toolsForAgent: orquestador ve todas; arnés solo list/assign', () => {
+test('toolsForAgent: orquestador ve las suyas; arnés solo list/assign', () => {
   const orchestrator = toolsForAgent(null).map((t) => t.name).sort();
   const support = toolsForAgent('support').map((t) => t.name).sort();
-  assert.deepEqual(orchestrator, AGENT_TOOLS.map((t) => t.name).sort());
+  assert.deepEqual(
+    orchestrator,
+    AGENT_TOOLS.map((t) => t.name)
+      .filter((name) => !['get_my_intention', 'set_my_intention'].includes(name))
+      .sort()
+  );
   assert.deepEqual(support, [
     'assign_activity',
     'get_activity_result',
@@ -116,6 +122,8 @@ test('toolsForAgent: orquestador ve todas; arnés solo list/assign', () => {
     'list_activities',
     'set_my_intention',
   ]);
+  assert.equal(orchestrator.includes('get_my_intention'), false);
+  assert.equal(orchestrator.includes('set_my_intention'), false);
 });
 
 test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
@@ -187,4 +195,16 @@ test('describeToolProposal resume una estrategia', () => {
   });
   assert.match(summary, /Validar demanda B2B/);
   assert.match(summary, /b2b: Conseguir 5 leads/);
+});
+
+test('toolsForAgent: un agente no autorizado no hereda tools de orquestador', () => {
+  assert.equal(toolsForAgent(null, { authorized: false }).length, 0);
+  assert.equal(toolsForAgent(null, { orchestrator: false }).length, 0);
+  assert.ok(toolsForAgent(null, { authorized: true, orchestrator: true }).length > 0);
+});
+
+test('set_my_intention requiere aprobación (no es escritura directa)', () => {
+  assert.equal(isDirectWrite('set_my_intention'), false);
+  assert.equal(isDirectWrite('set_strategy'), true);
+  assert.equal(isDirectWrite('set_harness_intention'), true);
 });

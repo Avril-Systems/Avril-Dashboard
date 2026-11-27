@@ -1,6 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
+import { HARNESS_TYPES, isHarnessType } from './lib/harnessActivities';
 
 /**
  * Metacognition v0.1 — host storage (Convex).
@@ -61,6 +62,38 @@ async function stateFor(ctx: any, sessionId: any, agentKey: string) {
     .first();
 }
 
+function harnessForAgent(agentKey: string, meta: unknown): string | null {
+  const record = meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, unknown>) : {};
+  for (const candidate of [record.harnessType, record.harness]) {
+    if (isHarnessType(candidate)) return candidate;
+  }
+  const key = agentKey.trim();
+  if (isHarnessType(key)) return key;
+  for (const harness of HARNESS_TYPES) {
+    if (key.startsWith(`${harness}:`) || key.startsWith(`${harness}-`)) return harness;
+  }
+  return null;
+}
+
+function activityExperience(row: any): string {
+  const result = row.result;
+  let summary = '';
+  if (result && typeof result === 'object' && !Array.isArray(result) && result.summary !== undefined) {
+    summary = JSON.stringify(result.summary).slice(0, 400);
+  } else if (result !== undefined) {
+    summary = JSON.stringify(result).slice(0, 300);
+  }
+  return [
+    `[activity] ${row.harnessType}/${row.activity}`,
+    `status=${row.status}`,
+    row.title ? `title=${String(row.title).slice(0, 120)}` : '',
+    row.error ? `error=${String(row.error).slice(0, 200)}` : '',
+    summary ? `result=${summary}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 async function requireAgent(ctx: any, sessionId: any, agentKey: string) {
   requireSafeKey(agentKey, 'agentKey');
   const agent = await ctx.db
@@ -111,6 +144,19 @@ export const enableMetacognitionServer = mutation({
       updatedAt: now,
     });
     return { enabled: args.enabled, cadenceMs: cadence };
+  },
+});
+
+/** Objetivos habilitados para el scheduler del runtime (todos los tenants del deployment). */
+export const listEnabledMetacognitionTargetsServer = query({
+  args: { serverSecret: v.string() },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    const rows = await ctx.db
+      .query('metacognitionStates')
+      .withIndex('by_enabled', (q) => q.eq('enabled', true))
+      .collect();
+    return rows.map((row) => ({ sessionId: row.sessionId, agentKey: row.agentKey }));
   },
 });
 
@@ -228,10 +274,18 @@ export const listMetacognitionExperienceServer = query({
     agentKey: v.string(),
     since: v.optional(v.string()),
     limit: v.optional(v.number()),
+    tenantId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     requireServerSecret(args.serverSecret);
     requireSafeKey(args.agentKey, 'agentKey');
+
+    const take = Math.max(1, Math.min(Math.trunc(args.limit ?? 12), 12));
+    const agent = await ctx.db
+      .query('orchestrationAgents')
+      .withIndex('by_session_agentKey', (q) => q.eq('sessionId', args.sessionId).eq('agentKey', args.agentKey))
+      .first();
+    const harnessType = agent ? harnessForAgent(agent.agentKey, agent.meta) : harnessForAgent(args.agentKey, undefined);
 
     const chat = await ctx.db
       .query('chats')
@@ -239,24 +293,63 @@ export const listMetacognitionExperienceServer = query({
         q.eq('orchestrationSessionId', args.sessionId).eq('agentKey', args.agentKey)
       )
       .first();
-    if (!chat || chat.kind !== 'agent') return [];
 
-    const take = Math.max(1, Math.min(Math.trunc(args.limit ?? 12), 12));
-    const messages = await ctx.db
-      .query('messages')
-      .withIndex('by_chat_createdAt', (q) =>
-        q.eq('chatId', chat._id).gt('createdAt', args.since ?? '')
-      )
-      .order('asc')
-      .take(take);
+    const messages =
+      chat && chat.kind === 'agent'
+        ? await ctx.db
+            .query('messages')
+            .withIndex('by_chat_createdAt', (q) =>
+              q.eq('chatId', chat._id).gt('createdAt', args.since ?? '')
+            )
+            .order('asc')
+            .take(take)
+        : [];
 
-    return messages.map((message) => ({
-      _id: message._id,
-      role: message.authorType,
-      authorId: message.authorId,
-      content: message.content.slice(0, 500),
-      createdAt: message.createdAt,
-    }));
+    let activities: any[] = [];
+    const tenantId = args.tenantId;
+    if (tenantId) {
+      const activityRows = harnessType
+        ? await ctx.db
+            .query('harnessActivities')
+            .withIndex('by_tenant_harness_createdAt', (q) =>
+              q
+                .eq('tenantId', tenantId)
+                .eq('harnessType', harnessType)
+                .gt('createdAt', args.since ?? '')
+            )
+            .order('asc')
+            .take(take * 2)
+        : await ctx.db
+            .query('harnessActivities')
+            .withIndex('by_tenant_createdAt', (q) =>
+              q.eq('tenantId', tenantId).gt('createdAt', args.since ?? '')
+            )
+            .order('asc')
+            .take(take * 2);
+      activities = activityRows
+        .filter((row) => row.status === 'completed' || row.status === 'failed' || row.status === 'blocked')
+        .slice(0, take)
+        .map((row) => ({
+          _id: `act:${row.activityId}`.slice(0, 128),
+          role: 'activity',
+          authorId: row.harnessType,
+          content: activityExperience(row).slice(0, 500),
+          createdAt: row.createdAt,
+        }));
+    }
+
+    return [
+      ...messages.map((message) => ({
+        _id: message._id,
+        role: message.authorType,
+        authorId: message.authorId,
+        content: message.content.slice(0, 500),
+        createdAt: message.createdAt,
+      })),
+      ...activities,
+    ]
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, take);
   },
 });
 

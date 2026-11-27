@@ -124,14 +124,8 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Si piden JSON, entrégalo; por defecto no envuelvas la respuesta en bloques JSON.',
     '- Si el pedido no corresponde a tu arnés, dilo y sugiere a quién derivarlo.',
     persona.harnessType
-      ? '- Tu intención particular marca el rumbo; tienes libertad para decidir cómo cumplirla con tus herramientas. Si el usuario te pide cambiarla, responde solo con el bloque de `set_my_intention` (el servidor es la única fuente).'
+      ? '- Tu intención particular marca el rumbo; tienes libertad para decidir cómo cumplirla con tus herramientas. Si el usuario te pide cambiarla, emite el bloque `set_my_intention` (propuesta formal; requiere aprobación y no se aplica en el turno).'
       : '- Cuando el usuario defina o cambie la intención general, usa `set_strategy` y deriva intenciones breves para los arneses; usa `set_harness_intention` para una particular concreta.',
-    '',
-    'Metacognición (obligatoria):',
-    '- Distingue explícitamente lo que consultaste con una herramienta de lo que infieres.',
-    '- Si no usaste herramienta en este turno, no afirmes el estado real de runs, actividades o arneses.',
-    '- Cuando uses datos de una tool, cierra con una línea "Fuente: <origen>".',
-    '- Si algo falló, falta o no lo sabes, dilo tal cual; no lo rellenes con suposiciones.',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
@@ -158,6 +152,12 @@ export function buildIntentionReminder(
       `Tu intención particular: ${
         intentions.harness?.[identity.persona.harnessType]?.trim() || 'sin definir'
       }`
+    );
+    lines.push(
+      'Para cambiarla, emite SOLO este bloque (el operador debe aprobarlo; no se aplica en el turno):',
+      '```tool',
+      '{"tool":"set_my_intention","arguments":{"body":"<nueva intención>"}}',
+      '```'
     );
   } else {
     const entries = Object.entries(intentions.harness ?? {});

@@ -15,7 +15,7 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { anyApi } from 'convex/server';
 import { NextResponse } from 'next/server';
-import { getClientIp, hitRateLimit, requireDashboardToken } from '@/src/lib/apiSecurity';
+import { getClientIp, hitRateLimit, swarmyOperatorStatus } from '@/src/lib/apiSecurity';
 
 export class SwarmyConfigError extends Error {
   missing: string[];
@@ -119,8 +119,15 @@ export async function sendRunCommand(input: { runId: string; agentKey: string; c
 
 /** Autenticación + rate limit comunes. Devuelve una respuesta de error o null si todo bien. */
 export function guardRequest(req: Request, bucket: string, limit: number): Response | null {
-  if (!requireDashboardToken(req)) {
+  const operator = swarmyOperatorStatus(req);
+  if (operator === 'unauthenticated') {
     return NextResponse.json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, { status: 401 });
+  }
+  if (operator === 'forbidden') {
+    return NextResponse.json(
+      { ok: false, error: { code: 'OPERATOR_REQUIRED', message: 'Se requiere un operador autorizado.' } },
+      { status: 403 }
+    );
   }
   if (hitRateLimit(`swarmy:${bucket}:${getClientIp(req)}`, limit)) {
     return NextResponse.json({ ok: false, error: { code: 'RATE_LIMITED', message: 'Rate limit exceeded' } }, { status: 429 });

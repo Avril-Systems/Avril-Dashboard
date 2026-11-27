@@ -202,7 +202,11 @@ export function buildToolInstructions(
         : []),
       ...(names.has('set_my_intention')
         ? ['- Usa `set_my_intention` solo si el usuario te pide explícitamente cambiar tu intención.',
-           '- Si te la pide, responde SOLO con el bloque de herramienta; no confirmes el cambio en texto sin ejecutarlo.',
+           '- Es una PROPUESTA formal: responde SOLO con el bloque, sin texto antes ni después. El operador la confirma o rechaza; no se aplica en el turno.',
+           '```tool',
+           '{"tool":"set_my_intention","arguments":{"body":"<nueva intención breve>"}}',
+           '```',
+           '- No describas la propuesta solo en texto: sin bloque, el operador no puede aprobarla.',
            '- Tu intención particular está en el prompt; decide libremente cómo cumplirla con tus herramientas.']
         : []),
       '- No conviertas la intención en un plan rígido ni exijas evidencia: es rumbo, no una tarea cerrada.'

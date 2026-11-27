@@ -16,9 +16,14 @@ import type { HarnessType } from '@/convex/lib/harnessActivities';
 
 export type AgentMetaInput = { agentKey: string; name?: string | null; role?: string | null; meta?: unknown };
 
+export type AgentKind = 'orchestrator' | 'harness' | 'unknown';
+
 export type AgentPersona = {
-  /** Arnés real detrás del agente; null = agente sin arnés (orquestador / genérico). */
+  /** Arnés real detrás del agente; null = sin arnés (orquestador o desconocido). */
   harnessType: HarnessType | null;
+  kind: AgentKind;
+  /** Solo orquestador/arnés registrados pueden actuar y usar tools. */
+  authorized: boolean;
   label: string;
   mission: string;
   capabilities: string[];
@@ -47,6 +52,8 @@ const HARNESS_MISSIONS: Record<HarnessType, string> = {
 
 const ORCHESTRATOR_PERSONA: AgentPersona = {
   harnessType: null,
+  kind: 'orchestrator',
+  authorized: true,
   label: 'Orquestador',
   mission:
     'Coordinas el trabajo del run: resumes el estado real, decides a qué agente delegar cada tarea y cuidas que nada se reporte como hecho sin evidencia.',
@@ -79,24 +86,82 @@ export function resolveHarnessType(input: { agentKey: string; meta?: unknown }):
   return null;
 }
 
-/** Persona del agente. Un `agentKey` sin arnés conocido se trata como orquestador. */
-export function buildAgentPersona(input: { agentKey: string; meta?: unknown }): AgentPersona {
+const ORCHESTRATOR_ROLES = new Set([
+  'orchestrator',
+  'orquestador',
+  'coordinator',
+  'coordinador',
+  'manager',
+  'coordination',
+]);
+const ORCHESTRATOR_KEYS = new Set(['swarm-strategy', 'orchestrator', 'orquestador']);
+
+function metaString(meta: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = meta[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase();
+  }
+  return '';
+}
+
+/** Orquestador SOLO si la identidad lo declara; un agente desconocido no hereda el rol. */
+export function isOrchestratorAgent(input: { agentKey: string; role?: string | null; meta?: unknown }): boolean {
+  if (resolveHarnessType(input)) return false;
+
+  const meta =
+    input.meta && typeof input.meta === 'object' && !Array.isArray(input.meta)
+      ? (input.meta as Record<string, unknown>)
+      : {};
+  const key = input.agentKey.trim().toLowerCase();
+  const role = (input.role ?? '').trim().toLowerCase();
+  const metaRole = metaString(meta, ['role', 'agentType', 'agent_type', 'kind']);
+
+  return (
+    ORCHESTRATOR_KEYS.has(key) ||
+    ORCHESTRATOR_ROLES.has(role) ||
+    ORCHESTRATOR_ROLES.has(metaRole) ||
+    meta.orchestrator === true
+  );
+}
+
+const UNKNOWN_PERSONA: AgentPersona = {
+  harnessType: null,
+  kind: 'unknown',
+  authorized: false,
+  label: 'Agente no registrado',
+  mission:
+    'Sin identidad autorizada en esta sesión. No puedes actuar como orquestador ni usar herramientas hasta que el operador registre tu rol.',
+  capabilities: [],
+  boundaries: [
+    'No tienes permisos de orquestador.',
+    'No inventes una identidad ni asumas capacidades que no estén registradas.',
+  ],
+};
+
+/** Persona del agente. Arnés conocido o rol de orquestador explícito; el resto no está autorizado. */
+export function buildAgentPersona(input: { agentKey: string; role?: string | null; meta?: unknown }): AgentPersona {
   const harnessType = resolveHarnessType(input);
-  if (!harnessType) {
+  if (harnessType) {
+    const harness = HARNESS_CATALOG[harnessType];
+    return {
+      harnessType,
+      kind: 'harness',
+      authorized: true,
+      label: harness.label,
+      mission: HARNESS_MISSIONS[harnessType],
+      capabilities: harness.activities.map(
+        (activity) =>
+          `${activity.label} [${activity.origin === 'original' ? 'original' : 'adicional'}] — ${activity.description}`,
+      ),
+      boundaries: [...SHARED_BOUNDARIES],
+    };
+  }
+
+  if (isOrchestratorAgent(input)) {
     return { ...ORCHESTRATOR_PERSONA, boundaries: [...ORCHESTRATOR_PERSONA.boundaries] };
   }
 
-  const harness = HARNESS_CATALOG[harnessType];
-  return {
-    harnessType,
-    label: harness.label,
-    mission: HARNESS_MISSIONS[harnessType],
-    capabilities: harness.activities.map(
-      (activity) =>
-        `${activity.label} [${activity.origin === 'original' ? 'original' : 'adicional'}] — ${activity.description}`,
-    ),
-    boundaries: [...SHARED_BOUNDARIES],
-  };
+  return { ...UNKNOWN_PERSONA, boundaries: [...UNKNOWN_PERSONA.boundaries] };
 }
 
 export type ResolvedAgentIdentity = {

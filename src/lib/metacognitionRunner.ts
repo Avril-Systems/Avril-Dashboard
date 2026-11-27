@@ -72,6 +72,7 @@ export async function runMetacognitionCycle(args: {
       agentKey: args.agentKey,
       since: claim.cursor,
       limit: 12,
+      tenantId: process.env.SWARMY_TENANT_ID || null,
     });
 
     if (experienceRows.length === 0) {
