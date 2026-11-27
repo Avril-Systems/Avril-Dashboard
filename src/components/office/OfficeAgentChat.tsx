@@ -40,6 +40,16 @@ type PendingMessage = { content: string; at: number };
 
 type ToolProposal = { tool: string; arguments: Record<string, unknown>; summary: string };
 
+type ServerToolCall = {
+  _id: string;
+  tool: string;
+  ok: boolean;
+  error: string | null;
+  runId: string | null;
+  activityId: string | null;
+  createdAt: string;
+};
+
 type ModelChoice = 'venice' | 'codex' | 'opus' | 'mock';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
@@ -69,6 +79,8 @@ export default function OfficeAgentChat({
   const [proposal, setProposal] = useState<ToolProposal | null>(null);
   /** Tool de lectura usada en el último turno (señal visual; no se persiste en S02a). */
   const [toolNote, setToolNote] = useState<string | null>(null);
+  /** Traza persistida de tools del orquestador (S03). */
+  const [toolCalls, setToolCalls] = useState<ServerToolCall[]>([]);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -131,6 +143,7 @@ export default function OfficeAgentChat({
       setError(null);
       setChatId(typeof data.chatId === 'string' ? data.chatId : null);
       setMessages(Array.isArray(data.messages) ? (data.messages as ServerMessage[]) : []);
+      setToolCalls(Array.isArray(data.toolCalls) ? (data.toolCalls as ServerToolCall[]) : []);
     } catch (err) {
       if (activeAgentKeyRef.current !== requestedAgentKey) return;
       setError(err instanceof Error ? err.message : 'No se pudo cargar la conversación.');
@@ -145,6 +158,7 @@ export default function OfficeAgentChat({
     setError(null);
     setPending(null);
     setToolNote(null);
+    setToolCalls([]);
     setProposal(null);
     if (!activeAgentKey) return;
 
@@ -380,6 +394,31 @@ export default function OfficeAgentChat({
         <p className="border-b border-border/40 bg-background/20 px-4 py-1 text-[10px] text-muted-foreground">
           🔧 {toolNote}
         </p>
+      )}
+      {toolCalls.length > 0 && (
+        <details className="border-b border-border/40 bg-background/20 px-4 py-1.5">
+          <summary className="cursor-pointer select-none text-[10px] text-muted-foreground">
+            Traza del orquestador · {toolCalls.length}
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {toolCalls.slice(0, 10).map((call) => (
+              <li key={call._id} className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span className="font-mono text-foreground/80">{call.tool}</span>
+                <span className={call.ok ? 'text-emerald-300' : 'text-rose-300'}>{call.ok ? 'ok' : 'error'}</span>
+                <span>{new Date(call.createdAt).toLocaleTimeString()}</span>
+                {call.runId && (
+                  <a
+                    href={`/agents/swarmy?runId=${encodeURIComponent(call.runId)}`}
+                    className="text-brand hover:underline"
+                  >
+                    Ver run
+                  </a>
+                )}
+                {call.error && <span className="text-rose-300/80">{call.error.slice(0, 100)}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {/* Messages */}

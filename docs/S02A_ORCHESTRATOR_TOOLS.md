@@ -24,8 +24,9 @@ parsea y valida antes de ejecutar nada:
 - Una herramienta por turno, sin texto antes ni después.
 - El servidor valida nombre, argumentos obligatorios y tipos; si el bloque es inválido **no se
   ejecuta** y el error se muestra tal cual.
-- Tras ejecutar, el resultado real se inyecta como contexto para una segunda llamada al modelo,
-  que redacta la respuesta final. El bloque de herramienta nunca se persiste en el hilo.
+- Tras ejecutar, el resultado real se resume de forma **determinista en servidor** (sin segunda
+  llamada al modelo). Así no se mezclan estados de mensajes anteriores ni se inventan cifras.
+  El bloque de herramienta nunca se persiste en el hilo.
 - Límite de una ronda de herramienta por mensaje (sin bucles).
 
 ## 3. Herramientas (solo lectura)
@@ -52,8 +53,8 @@ POST /api/chat/respond { sessionId, agentKey, message, model }
   → modelo responde texto o bloque ```tool```
   → parseToolCall(valida nombre + args)
   → executeAgentTool (Swarmy/Convex, server-only)
-  → segunda llamada al modelo con el resultado real
-  → se persiste SOLO la respuesta final; la API devuelve `toolCalls[]` con ok/error
+  → resumen determinista del resultado real (sin segunda llamada al modelo)
+  → se persiste la respuesta; la API devuelve `toolCalls[]` con ok/error
 ```
 
 ## 5. Archivos
@@ -64,7 +65,7 @@ POST /api/chat/respond { sessionId, agentKey, message, model }
 | `src/modules/agents/toolProtocol.ts` | Parser/validador del bloque, stripping y prompt de tools. |
 | `src/modules/agents/executeAgentTool.ts` | Ejecución server-only contra Swarmy/Convex + resumen de fallback. |
 | `src/modules/agents/buildAgentSystemPrompt.ts` | Inyecta las tools al prompt del orquestador. |
-| `app/api/chat/respond/route.ts` | Ronda de tool (1), segunda llamada y `toolCalls` en la respuesta. |
+| `app/api/chat/respond/route.ts` | Ronda de tool (1), resumen determinista y `toolCalls` en la respuesta. |
 | `src/components/office/OfficeAgentChat.tsx` | Señal visual transitoria (`🔧 Herramienta: …`). |
 | `script/agent-tool-protocol-check.mjs` | 8 tests puros del protocolo (`npm run agents:check`). |
 
@@ -81,7 +82,7 @@ POST /api/chat/respond { sessionId, agentKey, message, model }
 - Solo el orquestador (agente sin arnés) recibe tools; los agentes de arnés aún no.
 - No hay persistencia/auditoría de la tool call en el hilo: la señal visual es transitoria.
   Queda para S02c (evento/registro) y S03 (conexión con Swarmy).
-- La segunda llamada al modelo puede fallar (bridge caído, 401): en ese caso se devuelve un
-  resumen determinista de lo que devolvió la tool, sin inventar.
+- La respuesta de lectura es determinista (no la redacta el modelo); S05 (intención) puede
+  añadir redacción natural sin perder la fuente de verdad.
 - En el preview de Vercel no funciona todavía: ese build apunta a
   `outstanding-swordfish-684.convex.cloud`, donde no está el schema/funciones de S01/S02.

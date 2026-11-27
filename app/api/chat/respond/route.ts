@@ -5,6 +5,7 @@ import {
   getOrCreateAgentChat,
   listChats,
   listMessages,
+  recordAgentToolCall,
   sendMessage,
   sendAgentMessage,
   upsertChatIgnitionDraft,
@@ -29,7 +30,6 @@ import {
   summarizeConfirmedToolOutcome,
   summarizeToolOutcome,
 } from '@/src/modules/agents/executeAgentTool';
-import type { AgentToolOutcome } from '@/src/modules/agents/executeAgentTool';
 import type { ToolCall } from '@/src/modules/agents/toolProtocol';
 import { parseAvrilAssistantReply } from '@/src/modules/avril/parseAvrilAssistantReply';
 import { extractDraftFromArchitectPayload } from '@/src/modules/avril/extractDraftFromArchitectPayload';
@@ -149,17 +149,6 @@ function buildMockAgentReply(
     `Mensajes previos en este hilo: ${historyCount}.`,
     '',
     'Esto valida identidad, hilo por agente y persistencia. No valida Venice ni el bridge.',
-  ].join('\n');
-}
-
-/** Resultado real de una tool, empaquetado para la segunda llamada al modelo. */
-function buildToolResultMessage(call: ToolCall, outcome: AgentToolOutcome): string {
-  const body = outcome.ok ? JSON.stringify(outcome.data, null, 2) : `ERROR: ${outcome.error}`;
-  return [
-    `[Resultado real de la herramienta ${call.tool}]`,
-    body.slice(0, 8000),
-    '',
-    'Responde al usuario en lenguaje natural usando este dato real. No emitas otro bloque de herramienta.',
   ].join('\n');
 }
 
@@ -475,6 +464,23 @@ export async function POST(req: Request) {
       const outcome = await executeConfirmedAgentTool(call);
       const reply = summarizeConfirmedToolOutcome(outcome);
 
+      try {
+        const data = outcome.ok ? (outcome.data as any) : undefined;
+        await recordAgentToolCall({
+          chatId: resolvedConfirm.chatId,
+          sessionId: agentTarget.sessionId,
+          agentKey: resolvedConfirm.agent.agentKey,
+          tool: call.tool,
+          args: call.args,
+          ok: outcome.ok,
+          error: outcome.ok ? undefined : outcome.error,
+          runId: typeof data?.runId === 'string' ? data.runId : undefined,
+          activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
+        });
+      } catch {
+        // La traza no debe romper una acción que ya se ejecutó.
+      }
+
       let warning: string | undefined;
       try {
         await sendMessage({
@@ -728,24 +734,26 @@ export async function POST(req: Request) {
             ...(outcome.ok ? {} : { error: outcome.error }),
           });
 
-          const followUpInput: BridgeInput = {
-            ...input,
-            messages: [
-              ...(input.messages ?? []),
-              {
-                authorType: 'agent',
-                authorId: agentAuthorId ?? 'agent',
-                content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
-                createdAt: new Date().toISOString(),
-              },
-            ],
-            message: buildToolResultMessage(parsedCall.call, outcome),
-          };
+          try {
+            const data = outcome.ok ? (outcome.data as any) : undefined;
+            await recordAgentToolCall({
+              chatId,
+              sessionId: agentSessionId,
+              agentKey: agentAuthorId ?? 'agent',
+              tool: outcome.tool,
+              args: parsedCall.call.args,
+              ok: outcome.ok,
+              error: outcome.ok ? undefined : outcome.error,
+              runId: typeof data?.runId === 'string' ? data.runId : undefined,
+              activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
+            });
+          } catch {
+            // La traza no debe romper la respuesta.
+          }
 
-          const followUp = await callModel(followUpInput);
-          agentFinalText = followUp.ok
-            ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
-            : `${summarizeToolOutcome(outcome)}\n\n(No pude redactar el resumen con el modelo: ${followUp.message})`;
+          // Respuesta determinista: Venice no resume de forma fiable datos estructurados
+          // y mezcla estados de mensajes anteriores. La tool es la fuente de verdad.
+          agentFinalText = summarizeToolOutcome(outcome);
         }
       } else if (parsedCall.kind === 'invalid') {
         agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;

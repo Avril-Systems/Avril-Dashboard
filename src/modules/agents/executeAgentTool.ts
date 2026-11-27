@@ -212,27 +212,69 @@ export async function executeAgentTool(
   }
 }
 
-/** Resumen determinista cuando el modelo no puede redactar la respuesta final. */
+/** Resumen determinista y fiel de una tool de lectura (no pasa por el modelo). */
 export function summarizeToolOutcome(outcome: AgentToolOutcome): string {
   if (!outcome.ok) return `No pude completar la consulta (${outcome.tool}): ${outcome.error}`;
 
   const data = outcome.data as any;
+
+  const statusBreakdown = (rows: any[]) => {
+    const byStatus: Record<string, number> = {};
+    for (const row of rows) byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
+    return Object.entries(byStatus)
+      .map(([status, n]) => `${n} ${status}`)
+      .join(', ');
+  };
+
   switch (outcome.tool) {
-    case 'run_overview':
+    case 'run_overview': {
+      const acts = Array.isArray(data.activities) ? data.activities : [];
+      const types = Object.entries(data.eventsByType ?? {})
+        .sort((a: any, b: any) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([type, n]) => `${type}×${n}`)
+        .join(', ');
       return [
-        `Run ${data.runId}: ${data.eventCount} evento(s).`,
-        `Primer evento: ${data.firstAt ?? '—'} · último: ${data.lastAt ?? '—'} (${data.lastType ?? '—'}).`,
-        `Actividades: ${Array.isArray(data.activities) ? data.activities.length : 0}.`,
+        `Run ${data.runId}: ${data.eventCount} evento(s) (${data.firstAt ?? '—'} → ${data.lastAt ?? '—'}).`,
+        types ? `Tipos de evento: ${types}.` : '',
+        `Actividades: ${acts.length}${acts.length ? ` (${statusBreakdown(acts)})` : ''}.`,
         `Errores recientes: ${Array.isArray(data.recentErrors) ? data.recentErrors.length : 0}.`,
-      ].join(' ');
-    case 'list_activities':
-      return `Actividades encontradas: ${data.count}.`;
-    case 'harness_health':
-      return `Arneses: ${(data.harnesses ?? [])
-        .map((h: any) => `${h.harness}${h.connected === true ? ' conectado' : h.connected === false ? ' desconectado' : ' desconocido'}${h.stale ? ' (stale)' : ''}`)
-        .join(', ')}.`;
-    case 'list_agents':
-      return `Agentes en la sesión: ${data.count}.`;
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+    case 'list_activities': {
+      const rows = Array.isArray(data.activities) ? data.activities : [];
+      const recent = rows
+        .slice(0, 5)
+        .map(
+          (row: any) =>
+            `- ${row.harnessType}/${row.activity} · ${row.status}${row.error ? ` (${row.error})` : ''} · run ${row.runId}`,
+        )
+        .join('\n');
+      return [
+        `Actividades encontradas: ${data.count}${rows.length ? ` (${statusBreakdown(rows)})` : ''}.`,
+        recent ? `Más recientes:\n${recent}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    case 'harness_health': {
+      const harnesses = Array.isArray(data.harnesses) ? data.harnesses : [];
+      if (!harnesses.length) return 'No hay conexiones de arneses registradas.';
+      const lines = harnesses.map(
+        (h: any) =>
+          `- ${h.harness} (${h.agentKey}): ${
+            h.connected === true ? 'conectado' : h.connected === false ? 'desconectado' : 'conexión desconocida'
+          }${h.executing ? ' · ejecutando' : ''}${h.stale ? ' · stale' : ''}`,
+      );
+      return [`Arneses (${harnesses.length}):`, ...lines].join('\n');
+    }
+    case 'list_agents': {
+      const agents = Array.isArray(data.agents) ? data.agents : [];
+      const lines = agents.slice(0, 10).map((a: any) => `- ${a.name} (${a.agentKey}) · ${a.status}`);
+      return [`Agentes en la sesión: ${data.count}.`, ...lines].join('\n');
+    }
     default:
       return JSON.stringify(data).slice(0, 1200);
   }

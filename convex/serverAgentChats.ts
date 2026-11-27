@@ -121,3 +121,88 @@ export const getOrCreateAgentChatServer = mutation({
     return { chatId, agent: agentSnapshot(agent) };
   },
 });
+
+/**
+ * Traza de tools del orquestador (S03). Se escribe SIEMPRE en servidor, después de
+ * ejecutar (o de proponer) una tool, para que la conversación sea auditable tras
+ * una recarga y se pueda enlazar el run creado.
+ */
+export const recordAgentToolCallServer = mutation({
+  args: {
+    serverSecret: v.string(),
+    chatId: v.id('chats'),
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    tool: v.string(),
+    args: v.any(),
+    ok: v.boolean(),
+    error: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    activityId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeKey(args.agentKey, 'agentKey');
+    requireSafeKey(args.tool, 'tool');
+
+    const chat = requireEntity(await ctx.db.get(args.chatId), 'Chat');
+    if (chat.orchestrationSessionId !== args.sessionId || chat.kind !== 'agent') {
+      throw new Error('El chat no corresponde a la sesión/agente indicados.');
+    }
+
+    return await ctx.db.insert('agentToolCalls', {
+      chatId: args.chatId,
+      sessionId: args.sessionId,
+      agentKey: args.agentKey,
+      tool: args.tool,
+      args: args.args ?? {},
+      ok: args.ok,
+      error: args.error?.slice(0, 500),
+      runId: args.runId?.slice(0, 128),
+      activityId: args.activityId?.slice(0, 128),
+      createdAt: new Date().toISOString(),
+    });
+  },
+});
+
+const toolCallPublic = (row: {
+  _id: string;
+  tool: string;
+  args: unknown;
+  ok: boolean;
+  error?: string;
+  runId?: string;
+  activityId?: string;
+  createdAt: string;
+}) => ({
+  _id: row._id,
+  tool: row.tool,
+  args: row.args,
+  ok: row.ok,
+  error: row.error ?? null,
+  runId: row.runId ?? null,
+  activityId: row.activityId ?? null,
+  createdAt: row.createdAt,
+});
+
+/** Últimas tools de un chat de agente (para pintar la traza persistida). */
+export const listAgentToolCallsServer = query({
+  args: {
+    serverSecret: v.string(),
+    chatId: v.id('chats'),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireEntity(await ctx.db.get(args.chatId), 'Chat');
+
+    const take = Math.max(1, Math.min(args.limit ?? 20, 50));
+    const rows = await ctx.db
+      .query('agentToolCalls')
+      .withIndex('by_chat', (q) => q.eq('chatId', args.chatId))
+      .order('desc')
+      .take(take);
+
+    return rows.map(toolCallPublic);
+  },
+});

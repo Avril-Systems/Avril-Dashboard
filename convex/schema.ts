@@ -253,6 +253,24 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
   }).index('by_chat', ['chatId']),
+  /**
+   * Traza persistida de las tools del orquestador (S03): qué consultó/ejecutó,
+   * resultado y a qué run/actividad apuntó. Sobrevive a recargas y es auditable.
+   */
+  agentToolCalls: defineTable({
+    chatId: v.id('chats'),
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    tool: v.string(),
+    args: v.any(),
+    ok: v.boolean(),
+    error: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    activityId: v.optional(v.string()),
+    createdAt: v.string(),
+  })
+    .index('by_chat', ['chatId'])
+    .index('by_session', ['sessionId']),
   wallets: defineTable({ organizationId: v.id('organizations'), ownerUserId: v.id('users'), provider: v.string(), address: v.string(), createdAt: v.string() }).index('by_org', ['organizationId']),
   walletPermissions: defineTable({ walletId: v.id('wallets'), memberUserId: v.id('users'), permission: v.union(v.literal('view'), v.literal('propose'), v.literal('execute'), v.literal('approve')), createdAt: v.string() }).index('by_wallet_user', ['walletId', 'memberUserId']),
   approvals: defineTable({

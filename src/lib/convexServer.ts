@@ -344,6 +344,59 @@ export async function getOrCreateAgentChat(args: {
   });
 }
 
+/** Traza persistida de tools del orquestador (S03). */
+export type AgentToolCallRow = {
+  _id: string;
+  tool: string;
+  args: unknown;
+  ok: boolean;
+  error: string | null;
+  runId: string | null;
+  activityId: string | null;
+  createdAt: string;
+};
+
+export async function recordAgentToolCall(args: {
+  chatId: string;
+  sessionId: string;
+  agentKey: string;
+  tool: string;
+  args: unknown;
+  ok: boolean;
+  error?: string;
+  runId?: string;
+  activityId?: string;
+}): Promise<string> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:recordAgentToolCallServer', {
+    chatId: args.chatId,
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    tool: args.tool,
+    args: args.args ?? {},
+    ok: args.ok,
+    error: args.error,
+    runId: args.runId,
+    activityId: args.activityId,
+    serverSecret,
+  });
+}
+
+export async function listAgentToolCalls(args: {
+  chatId: string;
+  limit?: number;
+}): Promise<AgentToolCallRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverAgentChats:listAgentToolCallsServer', {
+    chatId: args.chatId,
+    limit: args.limit ?? 20,
+    serverSecret,
+  })) as AgentToolCallRow[];
+  return Array.isArray(rows) ? rows : [];
+}
+
 export async function getControlPlaneState(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
