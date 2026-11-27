@@ -28,6 +28,7 @@ import {
   SwarmyConfigError,
 } from '@/src/lib/swarmyServer';
 import type { HarnessActivityRow } from '@/src/lib/swarmyServer';
+import { normalizeHarnessIntentions } from './intentionArgs';
 import { getAgentTool } from './toolCatalog';
 import type { ToolCall } from './toolProtocol';
 
@@ -390,19 +391,8 @@ export async function executeConfirmedAgentTool(
       case 'set_strategy': {
         if (context.harnessType) throw new Error('Solo el orquestador define la intención general.');
         const strategicRaw = asString(call.args.strategic, MAX_INTENTION_CHARS);
-        const entriesRaw = Array.isArray(call.args.harnessIntentions) ? call.args.harnessIntentions : [];
-        const harnessIntentions: Array<{ harnessType: string; body: string }> = [];
-        for (const entry of entriesRaw) {
-          if (!entry || typeof entry !== 'object') continue;
-          const record = entry as Record<string, unknown>;
-          const harnessType = asString(record.harnessType, 40);
-          const body = asString(record.body, MAX_INTENTION_CHARS);
-          if (!isHarnessType(harnessType)) throw new Error('harnessIntentions incluye un arnés inválido.');
-          if (!body) throw new Error(`La intención de ${harnessType} está vacía.`);
-          if (!harnessIntentions.some((item) => item.harnessType === harnessType)) {
-            harnessIntentions.push({ harnessType, body });
-          }
-        }
+        // Acepta array canónico y mapa {harnessType: body}; valida sin descartar en silencio.
+        const harnessIntentions = normalizeHarnessIntentions(call.args.harnessIntentions);
         if (!strategicRaw && harnessIntentions.length === 0) {
           throw new Error('Falta strategic o harnessIntentions.');
         }
