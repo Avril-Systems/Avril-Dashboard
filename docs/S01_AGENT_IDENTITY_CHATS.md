@@ -191,9 +191,12 @@ Registro preparado para los cuatro arneses, sin tocar los agentes legacy:
 - Session: `m97277rgqhezjj37a16w7rr6gd8k1m0c`
 - Chat: `jx7crmxx2r5aq6d5bzxa36tt6s8k0w7c`
 - Organización: `md74cex8bajvg36mj1att3hr218bd7tr`
+- `swarm-strategy` · Orquestador · rol `orchestrator` · `meta.orchestrator=true`
 - `support` · Soporte · rol `support` · `meta.harnessType=support`
 - `b2b` · B2B · rol `b2b` · `meta.harnessType=b2b`
 - `prospecting` · Prospección · rol `prospecting` · `meta.harnessType=prospecting`
 - `marketing` · Marketing · rol `marketing` · `meta.harnessType=marketing`
 
-No se creó un orquestador en esta sesión: el alcance fue registrar los cuatro arneses. No se habilitó metacognición, no se definieron intenciones y no se arrancó el worker.
+El registro es reproducible con `npm run swarmy:register -- --session-id=<id>`
+(ver `AVRIL_SWARMY_REGISTRATION.md`). No se habilitó metacognición, no se definieron
+intenciones y no se arrancó el worker.

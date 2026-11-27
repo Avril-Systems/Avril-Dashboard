@@ -18,7 +18,8 @@
     "swarmy:check": "node --test script/chain-logic-check.mjs script/status-badge-check.mjs script/swarmy-runs-check.mjs script/harness-activities-check.mjs",
     "agents:check": "node --test script/agent-tool-protocol-check.mjs script/agent-meta-check.mjs script/inference-check.mjs",
     "harness:python:setup": "python3.11 -m venv .harness-venv && .harness-venv/bin/pip install -r harness/original/marketing/requirements.txt",
-    "metacognition:check": "node --test script/metacognition-check.mjs"
+    "metacognition:check": "node --test script/metacognition-check.mjs",
+    "swarmy:register": "node script/register-swarmy-agents.mjs"
   },
   "dependencies": {
     "@human.tech/passport-embed": "^0.3.4",
