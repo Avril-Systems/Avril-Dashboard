@@ -109,7 +109,7 @@ test('toolsForAgent: orquestador ve todas; arnés solo list/assign', () => {
   const orchestrator = toolsForAgent(null).map((t) => t.name).sort();
   const support = toolsForAgent('support').map((t) => t.name).sort();
   assert.deepEqual(orchestrator, AGENT_TOOLS.map((t) => t.name).sort());
-  assert.deepEqual(support, ['assign_activity', 'list_activities']);
+  assert.deepEqual(support, ['assign_activity', 'get_activity_result', 'list_activities']);
 });
 
 test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
@@ -117,6 +117,7 @@ test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
   assert.equal(isToolAllowedForAgent('request_control', 'marketing'), false);
   assert.equal(isToolAllowedForAgent('list_activities', 'marketing'), true);
   assert.equal(isToolAllowedForAgent('assign_activity', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('get_activity_result', 'marketing'), true);
   assert.equal(isToolAllowedForAgent('run_overview', null), true);
 });
 
@@ -134,4 +135,16 @@ test('describeToolProposal usa el arnés inyectado en la propuesta', () => {
   assert.match(summary, /prospecting/);
   assert.match(summary, /github_discovery/);
   assert.match(summary, /maxCandidates/);
+});
+
+test('parseToolCall acepta get_activity_result con activityId', () => {
+  const parsed = parseToolCall('```tool\n{"tool":"get_activity_result","arguments":{"activityId":"act_123"}}\n```');
+  assert.equal(parsed.kind, 'call');
+  if (parsed.kind !== 'call') return;
+  assert.equal(parsed.call.tool, 'get_activity_result');
+  assert.equal(parsed.call.args.activityId, 'act_123');
+});
+
+test('get_activity_result exige activityId', () => {
+  assert.equal(parseToolCall('```tool\n{"tool":"get_activity_result","arguments":{}}\n```').kind, 'invalid');
 });

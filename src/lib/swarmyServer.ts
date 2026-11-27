@@ -193,6 +193,17 @@ export async function listTenantActivities(input: {
   })) as HarnessActivityRow[];
 }
 
+/** Resultado completo de UNA actividad persistida (bajo demanda). */
+export async function getHarnessActivityResult(args: { activityId: string }): Promise<HarnessActivityRow | null> {
+  const c = getSwarmyConfig();
+  const client = new ConvexHttpClient(c.url);
+  return (await client.query(anyApi.serverOrchestration.getHarnessActivity, {
+    serverSecret: c.serverSecret,
+    tenantId: c.tenantId,
+    activityId: args.activityId,
+  })) as HarnessActivityRow | null;
+}
+
 export async function listRunActivities(runId: string): Promise<HarnessActivityRow[]> {
   return listTenantActivities({ runId, includeResult: true, limit: 50 });
 }

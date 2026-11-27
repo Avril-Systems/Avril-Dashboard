@@ -158,6 +158,7 @@ export function buildToolInstructions(
     '- Usa exactamente los nombres y argumentos listados. El servidor valida el bloque; si falta un argumento, no se ejecuta.',
     '- Las de LECTURA se ejecutan y te devuelven el dato real; después responderás al usuario en lenguaje natural.',
     '- Si el usuario pide ejecutar, preparar o encolar una actividad, usa `assign_activity`. Usa `list_activities` solo para consultar estado.',
+    '- Usa `get_activity_result` solo para UNA actividad concreta (interpretar qué encontró); no cargues todos los resultados.',
     '- Las de ESCRITURA NO se ejecutan: el servidor devuelve una propuesta y el operador la confirma en la UI. Nunca digas que ya se ejecutó.',
     '- Nunca inventes cifras, estados, runIds ni resultados. Si la herramienta falla, dilo tal cual.',
     '- Para acciones destructivas (kill/stop) o que crean runs, explica qué hará la propuesta y deja que el operador confirme.'

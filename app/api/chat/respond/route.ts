@@ -1115,9 +1115,42 @@ export async function POST(req: Request) {
             // La traza no debe romper la respuesta.
           }
 
-          // Respuesta determinista: Venice no resume de forma fiable datos estructurados
-          // y mezcla estados de mensajes anteriores. La tool es la fuente de verdad.
-          agentFinalText = summarizeToolOutcome(outcome);
+          // Resultado real bajo demanda: se lo damos al modelo para que lo interprete
+          // (una sola continuación, sin ciclos). Las demás lecturas siguen deterministas.
+          if (parsedCall.call.tool === 'get_activity_result' && outcome.ok) {
+            const resultJson = JSON.stringify(outcome.data, null, 2);
+            const capped =
+              resultJson.length > 16000
+                ? `${resultJson.slice(0, 16000)}\n…(resultado truncado)`
+                : resultJson;
+            const nowIso = new Date().toISOString();
+            const followUpInput: BridgeInput = {
+              ...input,
+              summary: undefined,
+              messages: [
+                { authorType: 'human', authorId: 'user', content: message, createdAt: nowIso },
+                {
+                  authorType: 'agent',
+                  authorId: agentAuthorId ?? 'agent',
+                  content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
+                  createdAt: nowIso,
+                },
+              ],
+              message: [
+                `[Resultado real de la herramienta ${parsedCall.call.tool}]`,
+                capped,
+                '',
+                'Interpreta este resultado real para el usuario: qué encontró, qué significa y cuál es el siguiente paso. No inventes datos.',
+              ].join('\n'),
+            };
+            const followUp = await callModel(followUpInput);
+            agentFinalText = followUp.ok
+              ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
+              : `${summarizeToolOutcome(outcome)}\n\n(No pude interpretar el resultado con el modelo: ${followUp.message})`;
+          } else {
+            // Respuesta determinista para listados/errores; la tool es la fuente de verdad.
+            agentFinalText = summarizeToolOutcome(outcome);
+          }
         }
       } else if (parsedCall.kind === 'invalid') {
         agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;

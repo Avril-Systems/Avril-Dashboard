@@ -58,3 +58,9 @@ test('acción confirmada -> confianza alta con fuente de la acción', () => {
   assert.equal(meta.confidence, 'high');
   assert.deepEqual(meta.sources, ['Swarmy · harnessActivities (cola durable)']);
 });
+
+test('get_activity_result declara la fuente del resultado', () => {
+  const meta = buildTurnMeta({ tools: [{ tool: 'get_activity_result', ok: true }], now });
+  assert.equal(meta.confidence, 'high');
+  assert.deepEqual(meta.sources, ['Swarmy · harnessActivities.result']);
+});

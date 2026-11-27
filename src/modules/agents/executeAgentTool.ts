@@ -14,6 +14,7 @@ import { listOrchestrationAgents } from '@/src/lib/convexServer';
 import { HarnessInputError, normalizeActivityInput } from '@/src/lib/harnessInput';
 import {
   assignHarnessActivity,
+  getHarnessActivityResult,
   getHarnessConnections,
   getRunEvents,
   isSafeId,
@@ -168,6 +169,33 @@ async function listAgents(sessionId: string) {
   return { sessionId, count: agents.length, agents };
 }
 
+async function getActivityResult(args: Record<string, unknown>, scopeHarness: string | null) {
+  const activityId = asString(args.activityId);
+  if (!isSafeId(activityId)) throw new Error('activityId inválido o ausente.');
+
+  const row = await getHarnessActivityResult({ activityId });
+  if (!row) throw new Error('Actividad no encontrada.');
+
+  if (scopeHarness && row.harnessType !== scopeHarness) {
+    throw new Error('Solo puedes consultar resultados de tu propio arnés.');
+  }
+
+  return {
+    activityId: row.activityId,
+    runId: row.runId,
+    harnessType: row.harnessType,
+    activity: row.activity,
+    title: row.title,
+    status: row.status,
+    error: row.error ?? null,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt ?? null,
+    summary: row.summary ?? null,
+    result: row.result ?? null,
+    resultChars: JSON.stringify(row.result ?? null).length,
+  };
+}
+
 /** Ejecuta una tool de LECTURA ya validada por `parseToolCall`. Las de escritura se rechazan. */
 export async function executeAgentTool(
   call: ToolCall,
@@ -192,6 +220,12 @@ export async function executeAgentTool(
         if (!isSafeId(runId)) throw new Error('runId inválido o ausente.');
         return { tool: call.tool, ok: true, data: await runOverview(runId) };
       }
+      case 'get_activity_result':
+        return {
+          tool: call.tool,
+          ok: true,
+          data: await getActivityResult(call.args, context.harnessType ?? null),
+        };
       case 'list_activities':
         return {
           tool: call.tool,
@@ -250,6 +284,15 @@ export function summarizeToolOutcome(outcome: AgentToolOutcome): string {
       ]
         .filter(Boolean)
         .join('\n');
+    }
+    case 'get_activity_result': {
+      const preview = JSON.stringify(data.result ?? null);
+      const short = preview.length > 1500 ? `${preview.slice(0, 1500)}…` : preview;
+      return [
+        `Actividad ${data.activityId} (${data.harnessType}/${data.activity}) · ${data.status}.`,
+        `Resumen: ${data.summary ? JSON.stringify(data.summary) : '—'}`,
+        `Resultado: ${short}`,
+      ].join('\n');
     }
     case 'list_activities': {
       const rows = Array.isArray(data.activities) ? data.activities : [];

@@ -15,6 +15,7 @@ export type AgentToolName =
   | 'list_activities'
   | 'harness_health'
   | 'list_agents'
+  | 'get_activity_result'
   | 'assign_activity'
   | 'request_control';
 
@@ -69,6 +70,20 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     args: [],
   },
   {
+    name: 'get_activity_result',
+    kind: 'read',
+    description:
+      'Recupera el resultado real persistido de UNA actividad concreta (bajo demanda). Úsalo para interpretar qué encontró el arnés y decidir el siguiente paso; no cargues todos los resultados.',
+    args: [
+      {
+        name: 'activityId',
+        type: 'string',
+        required: true,
+        description: 'activityId devuelto por list_activities o run_overview.',
+      },
+    ],
+  },
+  {
     name: 'assign_activity',
     kind: 'write',
     description:
@@ -108,7 +123,7 @@ export function isWriteTool(name: string): boolean {
 }
 
 /** Tools disponibles para un agente. El orquestador ve todas; un arnés solo las suyas. */
-const HARNESS_TOOL_NAMES: AgentToolName[] = ['list_activities', 'assign_activity'];
+const HARNESS_TOOL_NAMES: AgentToolName[] = ['list_activities', 'get_activity_result', 'assign_activity'];
 
 export function toolsForAgent(harnessType: string | null): AgentToolDef[] {
   if (!harnessType) return AGENT_TOOLS;
