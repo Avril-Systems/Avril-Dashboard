@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENT_TOOLS, isWriteTool } from '../src/modules/agents/toolCatalog.ts';
+import {
+  AGENT_TOOLS,
+  isDirectWrite,
+  isToolAllowedForAgent,
+  isWriteTool,
+  toolsForAgent,
+} from '../src/modules/agents/toolCatalog.ts';
 import { buildToolInstructions, describeToolProposal, parseToolCall, stripToolBlocks } from '../src/modules/agents/toolProtocol.ts';
 
 test('parseToolCall acepta un bloque válido', () => {
@@ -98,4 +104,107 @@ test('buildToolInstructions separa lectura y escritura', () => {
   assert.match(prompt, /LECTURA/);
   assert.match(prompt, /ESCRITURA/);
   assert.match(prompt, /confirmación/i);
+});
+
+test('toolsForAgent: orquestador ve las suyas; arnés solo list/assign', () => {
+  const orchestrator = toolsForAgent(null).map((t) => t.name).sort();
+  const support = toolsForAgent('support').map((t) => t.name).sort();
+  assert.deepEqual(
+    orchestrator,
+    AGENT_TOOLS.map((t) => t.name)
+      .filter((name) => !['get_my_intention', 'set_my_intention'].includes(name))
+      .sort()
+  );
+  assert.deepEqual(support, [
+    'assign_activity',
+    'get_activity_result',
+    'get_my_intention',
+    'list_activities',
+    'set_my_intention',
+  ]);
+  assert.equal(orchestrator.includes('get_my_intention'), false);
+  assert.equal(orchestrator.includes('set_my_intention'), false);
+});
+
+test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
+  assert.equal(isToolAllowedForAgent('run_overview', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('request_control', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('list_activities', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('assign_activity', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('get_activity_result', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('get_my_intention', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('set_my_intention', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('set_strategy', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('set_harness_intention', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('run_overview', null), true);
+});
+
+test('buildToolInstructions oculta harnessType y declara el alcance', () => {
+  const prompt = buildToolInstructions(toolsForAgent('support'), { harnessType: 'support' });
+  assert.match(prompt, /Alcance: solo tu arnés/);
+  assert.doesNotMatch(prompt, /harnessType:/);
+});
+
+test('describeToolProposal usa el arnés inyectado en la propuesta', () => {
+  const summary = describeToolProposal({
+    tool: 'assign_activity',
+    args: { harnessType: 'prospecting', activity: 'github_discovery', input: { queries: 'topic:mcp', maxCandidates: 5 } },
+  });
+  assert.match(summary, /prospecting/);
+  assert.match(summary, /github_discovery/);
+  assert.match(summary, /maxCandidates/);
+});
+
+test('parseToolCall acepta get_activity_result con activityId', () => {
+  const parsed = parseToolCall('```tool\n{"tool":"get_activity_result","arguments":{"activityId":"act_123"}}\n```');
+  assert.equal(parsed.kind, 'call');
+  if (parsed.kind !== 'call') return;
+  assert.equal(parsed.call.tool, 'get_activity_result');
+  assert.equal(parsed.call.args.activityId, 'act_123');
+});
+
+test('get_activity_result exige activityId', () => {
+  assert.equal(parseToolCall('```tool\n{"tool":"get_activity_result","arguments":{}}\n```').kind, 'invalid');
+});
+
+test('parseToolCall acepta set_strategy con particulares', () => {
+  const parsed = parseToolCall(
+    '```tool\n{"tool":"set_strategy","arguments":{"strategic":"Validar demanda B2B","harnessIntentions":[{"harnessType":"b2b","body":"Conseguir 5 leads"}]}}\n```'
+  );
+  assert.equal(parsed.kind, 'call');
+  if (parsed.kind !== 'call') return;
+  assert.equal(parsed.call.tool, 'set_strategy');
+  assert.equal(parsed.call.args.strategic, 'Validar demanda B2B');
+});
+
+test('set_harness_intention exige harnessType y body', () => {
+  assert.equal(parseToolCall('```tool\n{"tool":"set_harness_intention","arguments":{"harnessType":"b2b"}}\n```').kind, 'invalid');
+  assert.equal(
+    parseToolCall('```tool\n{"tool":"set_harness_intention","arguments":{"harnessType":"b2b","body":"X"}}\n```').kind,
+    'call'
+  );
+});
+
+test('describeToolProposal resume una estrategia', () => {
+  const summary = describeToolProposal({
+    tool: 'set_strategy',
+    args: {
+      strategic: 'Validar demanda B2B',
+      harnessIntentions: [{ harnessType: 'b2b', body: 'Conseguir 5 leads' }],
+    },
+  });
+  assert.match(summary, /Validar demanda B2B/);
+  assert.match(summary, /b2b: Conseguir 5 leads/);
+});
+
+test('toolsForAgent: un agente no autorizado no hereda tools de orquestador', () => {
+  assert.equal(toolsForAgent(null, { authorized: false }).length, 0);
+  assert.equal(toolsForAgent(null, { orchestrator: false }).length, 0);
+  assert.ok(toolsForAgent(null, { authorized: true, orchestrator: true }).length > 0);
+});
+
+test('set_my_intention requiere aprobación (no es escritura directa)', () => {
+  assert.equal(isDirectWrite('set_my_intention'), false);
+  assert.equal(isDirectWrite('set_strategy'), true);
+  assert.equal(isDirectWrite('set_harness_intention'), true);
 });

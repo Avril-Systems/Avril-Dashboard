@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, rejectLargePayload, requireDashboardToken } from '@/src/lib/apiSecurity';
 import {
+  cancelAgentToolProposal,
+  claimAgentToolProposal,
+  createAgentToolProposal,
+  finishAgentToolProposal,
+  getAgentChat,
   getDefaultOrganizationId,
   getOrCreateAgentChat,
+  getMetacognitionLessons,
+  getSessionIntentions,
   listChats,
   listMessages,
   recordAgentToolCall,
@@ -12,18 +19,30 @@ import {
 } from '@/src/lib/convexServer';
 import { formatBridgeFetchError, resolveOpenClawBridgeUrl } from '@/src/lib/openclawBridgeEnv';
 import {
+  callOpenAICompatible,
+  hasInferenceConfig,
+  inferenceTemperature,
+  readInferenceConfig,
+} from '@/src/lib/inference';
+import {
   augmentUserMessageForModel,
   buildAvrilUnifiedSystemPrompt,
 } from '@/src/modules/avril/buildAvrilSystemPrompt';
 import {
   augmentAgentMessageForModel,
   buildAgentSystemPrompt,
+  buildIntentionReminder,
 } from '@/src/modules/agents/buildAgentSystemPrompt';
 import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
-import { AGENT_TOOLS, getAgentTool } from '@/src/modules/agents/toolCatalog';
-import { detectIntent } from '@/src/modules/agents/intent';
+import {
+  getAgentTool,
+  isToolAllowedForAgent,
+  toolsForAgent,
+} from '@/src/modules/agents/toolCatalog';
+import { isActivityForHarness } from '@/convex/lib/harnessActivities';
 import { buildTurnMeta } from '@/src/modules/agents/turnMeta';
+import { selectRelevantLessons } from '@/src/modules/metacognition/lessons';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
 import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
 import {
@@ -60,9 +79,11 @@ type RequestBody = {
   message: string;
   organizationId?: string;
   /** `mock` solo existe en modo agente y solo fuera de producción (pruebas de plumbing). */
-  model?: 'codex' | 'opus' | 'venice' | 'mock';
-  /** Confirmación explícita de una tool de escritura propuesta antes (S02b). */
-  confirmTool?: { tool?: string; arguments?: Record<string, unknown> };
+  model?: 'auto' | 'openai' | 'codex' | 'opus' | 'venice' | 'mock';
+  /** Confirmación ligada a una propuesta persistida (punto 2). */
+  confirmProposalId?: string;
+  /** Cancelación de una propuesta pendiente. */
+  cancelProposalId?: string;
 };
 
 type PromptMode = 'architect' | 'agent';
@@ -75,12 +96,19 @@ type ApiErrorCode =
   | 'CONFIG_ERROR'
   | 'CHAT_NOT_FOUND'
   | 'AGENT_NOT_FOUND'
+  | 'AGENT_NOT_AUTHORIZED'
   | 'AGENT_CHAT_FAILED'
   | 'CONVEX_ERROR'
   | 'BRIDGE_TIMEOUT'
   | 'BRIDGE_ERROR'
   | 'VENICE_TIMEOUT'
   | 'VENICE_ERROR'
+  | 'INFERENCE_CONFIG_MISSING'
+  | 'INFERENCE_TIMEOUT'
+  | 'INFERENCE_ERROR'
+  | 'PROPOSAL_NOT_FOUND'
+  | 'PROPOSAL_NOT_PENDING'
+  | 'PROPOSAL_MISMATCH'
   | 'INTERNAL_ERROR';
 
 type BridgeResult =
@@ -120,6 +148,8 @@ type BridgeInput = {
   maxContextChars?: number;
   /** System prompt: Avril architect (founder flow) or the targeted agent's persona. */
   systemPrompt?: string;
+  /** Recordatorio de intenciones vigentes (se inserta tras el historial). */
+  intentionReminder?: string;
 };
 
 type VeniceResult =
@@ -154,7 +184,7 @@ function buildMockAgentReply(
   ].join('\n');
 }
 
-function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+function buildChatMessages(input: BridgeInput): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const base = input.systemPrompt?.trim() || buildAvrilUnifiedSystemPrompt();
   const meta = [input.area && `Primary area: ${input.area}.`, input.subArea && `Sub-area: ${input.subArea}.`]
     .filter(Boolean)
@@ -171,6 +201,14 @@ function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user
     { role: 'system', content: systemMain },
     ...(input.summary ? [{ role: 'system' as const, content: `Conversation summary: ${input.summary}` }] : []),
     ...fromContext,
+    ...(input.intentionReminder
+      ? [
+          {
+            role: 'user' as const,
+            content: `${input.intentionReminder}\n\n(Esta es la versión vigente; prevalece sobre el historial. Responde con ella.)`,
+          },
+        ]
+      : []),
     { role: 'user', content: augmentForMode(input.mode, input.message) },
   ];
 }
@@ -212,7 +250,7 @@ async function callVeniceInference(input: BridgeInput): Promise<VeniceResult> {
         },
         body: JSON.stringify({
           model: veniceModel,
-          messages: buildVeniceMessages(input),
+          messages: buildChatMessages(input),
           temperature: 0.45,
         }),
         cache: 'no-store',
@@ -394,6 +432,34 @@ async function callOpenClawBridge(input: BridgeInput): Promise<BridgeResult> {
   );
 }
 
+type ProviderKind = 'openai' | 'venice' | 'bridge' | 'mock';
+
+function hasVeniceConfig(): boolean {
+  return Boolean(
+    (process.env.VENICE_INFERENCE_KEY ?? '').trim() || (process.env.VENICE_ADMIN_KEY ?? '').trim()
+  );
+}
+
+/**
+ * Prioridad: elección explícita del caller; en `auto` (o sin `model`) se usa el
+ * proveedor genérico OpenAI-compatible si está configurado; luego Venice; luego bridge.
+ */
+function resolveProvider(requested: RequestBody['model']): ProviderKind {
+  if (requested === 'mock') return 'mock';
+  if (requested === 'venice') return 'venice';
+  if (requested === 'codex' || requested === 'opus') return 'bridge';
+  if (requested === 'openai') return 'openai';
+  if (hasInferenceConfig()) return 'openai';
+  if (hasVeniceConfig()) return 'venice';
+  return 'bridge';
+}
+
+function proposalError(reason: string): { status: number; code: ApiErrorCode } {
+  if (reason === 'not_found') return { status: 404, code: 'PROPOSAL_NOT_FOUND' };
+  if (reason === 'mismatch') return { status: 403, code: 'PROPOSAL_MISMATCH' };
+  return { status: 409, code: 'PROPOSAL_NOT_PENDING' };
+}
+
 export async function POST(req: Request) {
   try {
     if (!requireDashboardToken(req)) {
@@ -424,46 +490,176 @@ export async function POST(req: Request) {
     const message = body.message?.trim();
 
     /**
-     * S02b: confirmación explícita de una tool de ESCRITURA propuesta antes.
-     * No llama al modelo: valida de nuevo y ejecuta la acción real una sola vez.
+     * Punto 2: la confirmación se vincula a una propuesta persistida (`proposalId`).
+     * El claim es atómico (pending -> executing): una propuesta se ejecuta una sola vez.
+     * Se reutiliza la autenticación del endpoint y se valida sesión/agente/chat/org.
      */
-    const confirmToolRaw = body.confirmTool;
-    if (confirmToolRaw !== undefined) {
+    const confirmProposalId = body.confirmProposalId?.trim();
+    const cancelProposalId = body.cancelProposalId?.trim();
+
+    if (confirmProposalId || cancelProposalId) {
       if (!agentTarget) {
-        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere sessionId + agentKey.');
-      }
-
-      const toolName = typeof confirmToolRaw?.tool === 'string' ? confirmToolRaw.tool.trim() : '';
-      const rawArgs = confirmToolRaw?.arguments;
-      if (
-        !toolName ||
-        (rawArgs !== undefined &&
-          (rawArgs === null || typeof rawArgs !== 'object' || Array.isArray(rawArgs)))
-      ) {
-        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere { tool, arguments? }.');
-      }
-
-      const def = getAgentTool(toolName);
-      if (!def || def.kind !== 'write') {
-        return errorResponse(400, 'BAD_REQUEST', 'Solo se pueden confirmar tools de escritura.');
-      }
-
-      let resolvedConfirm: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
-      try {
-        resolvedConfirm = await getOrCreateAgentChat(agentTarget);
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        const notFound = /unknown agent/i.test(detail);
         return errorResponse(
-          notFound ? 404 : 502,
-          notFound ? 'AGENT_NOT_FOUND' : 'AGENT_CHAT_FAILED',
-          notFound ? 'Unknown agent for this session.' : 'Failed to resolve the agent conversation.',
-          { retryable: !notFound, details: detail }
+          400,
+          'BAD_REQUEST',
+          'confirmProposalId/cancelProposalId requieren sessionId + agentKey.'
+        );
+      }
+      if (confirmProposalId && cancelProposalId) {
+        return errorResponse(400, 'BAD_REQUEST', 'Envía solo confirmProposalId o cancelProposalId.');
+      }
+
+      if (cancelProposalId) {
+        let cancelled: Awaited<ReturnType<typeof cancelAgentToolProposal>>;
+        try {
+          cancelled = await cancelAgentToolProposal({
+            proposalId: cancelProposalId,
+            sessionId: agentTarget.sessionId,
+            agentKey: agentTarget.agentKey,
+          });
+        } catch (err) {
+          return errorResponse(502, 'CONVEX_ERROR', 'No se pudo cancelar la propuesta.', {
+            retryable: true,
+            details: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        if (!cancelled.ok) {
+          const { status, code } = proposalError(cancelled.reason ?? 'not_pending');
+          return errorResponse(
+            status,
+            code,
+            `No se pudo cancelar la propuesta (${cancelled.reason ?? 'not_pending'}${
+              cancelled.status ? `: ${cancelled.status}` : ''
+            }).`
+          );
+        }
+
+        return NextResponse.json({
+          ok: true,
+          mode: 'agent',
+          proposalId: cancelProposalId,
+          status: 'cancelled',
+        });
+      }
+
+      let claim: Awaited<ReturnType<typeof claimAgentToolProposal>>;
+      try {
+        claim = await claimAgentToolProposal({
+          proposalId: confirmProposalId as string,
+          sessionId: agentTarget.sessionId,
+          agentKey: agentTarget.agentKey,
+        });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo reclamar la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      if (!claim.ok) {
+        const { status, code } = proposalError(claim.reason);
+        return errorResponse(
+          status,
+          code,
+          `La propuesta no se puede confirmar (${claim.reason}${
+            claim.status ? `: ${claim.status}` : ''
+          }). No se ejecutó nada.`
         );
       }
 
-      const call: ToolCall = { tool: def.name, args: (rawArgs ?? {}) as Record<string, unknown> };
-      const outcome = await executeConfirmedAgentTool(call);
+      const def = getAgentTool(claim.proposal.tool);
+      if (!def || def.kind !== 'write') {
+        try {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'Herramienta no válida en la propuesta.',
+          });
+        } catch {
+          // el claim ya evitó duplicados
+        }
+        return errorResponse(400, 'BAD_REQUEST', 'La propuesta no corresponde a una herramienta de escritura.');
+      }
+
+      let confirmHarness: string | null = null;
+      let confirmIdentity: ResolvedAgentIdentity | null = null;
+      try {
+        const agentChat = await getAgentChat({
+          sessionId: claim.proposal.sessionId,
+          agentKey: claim.proposal.agentKey,
+        });
+        if (!agentChat) {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'El agente de la propuesta ya no existe.',
+          });
+          return errorResponse(404, 'AGENT_NOT_FOUND', 'El agente de la propuesta ya no existe.');
+        }
+        confirmIdentity = resolveAgentIdentity({
+          agentKey: agentChat.agent.agentKey,
+          name: agentChat.agent.name,
+          role: agentChat.agent.role,
+          meta: agentChat.agent.meta,
+        });
+        confirmHarness = confirmIdentity.persona.harnessType;
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo verificar el agente de la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      if (!confirmIdentity?.persona.authorized) {
+        try {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'El agente no tiene identidad autorizada.',
+          });
+        } catch {
+          // el claim ya evitó duplicados
+        }
+        return errorResponse(403, 'AGENT_NOT_AUTHORIZED', 'El agente no tiene una identidad autorizada.');
+      }
+
+      if (
+        !isToolAllowedForAgent(def.name, confirmHarness, {
+          authorized: confirmIdentity.persona.authorized,
+          orchestrator: confirmIdentity.persona.kind === 'orchestrator',
+        })
+      ) {
+        try {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'Herramienta no disponible para este arnés.',
+          });
+        } catch {
+          // el claim ya evitó duplicados
+        }
+        return errorResponse(400, 'BAD_REQUEST', 'La propuesta usa una herramienta no disponible para este arnés.');
+      }
+
+      const call: ToolCall = { tool: def.name, args: claim.proposal.args };
+      const outcome = await executeConfirmedAgentTool(call, {
+        sessionId: claim.proposal.sessionId,
+        harnessType: confirmHarness,
+        agentKey: claim.proposal.agentKey,
+      });
+
+      try {
+        await finishAgentToolProposal({
+          proposalId: claim.proposal._id,
+          status: outcome.ok ? 'executed' : 'failed',
+          result: outcome.ok ? outcome.data : undefined,
+          error: outcome.ok ? undefined : outcome.error,
+        });
+      } catch {
+        // El claim es la garantía anti-duplicado; si no se puede cerrar, queda executing.
+      }
+
       const reply = summarizeConfirmedToolOutcome(outcome);
       const meta = buildTurnMeta({
         tools: [{ tool: call.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
@@ -473,9 +669,9 @@ export async function POST(req: Request) {
       try {
         const data = outcome.ok ? (outcome.data as any) : undefined;
         await recordAgentToolCall({
-          chatId: resolvedConfirm.chatId,
-          sessionId: agentTarget.sessionId,
-          agentKey: resolvedConfirm.agent.agentKey,
+          chatId: claim.proposal.chatId,
+          sessionId: claim.proposal.sessionId,
+          agentKey: claim.proposal.agentKey,
           tool: call.tool,
           args: call.args,
           ok: outcome.ok,
@@ -490,13 +686,13 @@ export async function POST(req: Request) {
       let warning: string | undefined;
       try {
         await sendMessage({
-          chatId: resolvedConfirm.chatId,
+          chatId: claim.proposal.chatId,
           content: `Confirmo: ${describeToolProposal(call)}`,
         });
         await sendAgentMessage({
-          chatId: resolvedConfirm.chatId,
+          chatId: claim.proposal.chatId,
           content: reply,
-          authorId: resolvedConfirm.agent.agentKey,
+          authorId: claim.proposal.agentKey,
           meta,
         });
       } catch (err) {
@@ -508,8 +704,10 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         mode: 'agent',
-        chatId: resolvedConfirm.chatId,
-        agentKey: resolvedConfirm.agent.agentKey,
+        chatId: claim.proposal.chatId,
+        agentKey: claim.proposal.agentKey,
+        proposalId: claim.proposal._id,
+        proposalStatus: outcome.ok ? 'executed' : 'failed',
         reply,
         toolCalls: [
           {
@@ -561,6 +759,7 @@ export async function POST(req: Request) {
     let summaryText: string | undefined;
     let agentIdentity: ResolvedAgentIdentity | null = null;
     let agentTools: AgentToolDef[] = [];
+    let intentionReminder: string | undefined;
 
     if (agentTarget) {
       let resolved: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
@@ -585,9 +784,49 @@ export async function POST(req: Request) {
         role: resolved.agent.role,
         meta: resolved.agent.meta,
       });
-      // S02a: las tools de lectura son capacidad del orquestador (agente sin arnés).
-      agentTools = identity.persona.harnessType === null ? AGENT_TOOLS : [];
-      systemPrompt = buildAgentSystemPrompt(identity, { sessionId, tools: agentTools });
+      if (!identity.persona.authorized) {
+        return errorResponse(
+          403,
+          'AGENT_NOT_AUTHORIZED',
+          'El agente no tiene una identidad autorizada en esta sesión.'
+        );
+      }
+
+      // Punto 3: el orquestador ve todas las tools; cada arnés solo las suyas.
+      agentTools = toolsForAgent(identity.persona.harnessType, {
+        authorized: identity.persona.authorized,
+        orchestrator: identity.persona.kind === 'orchestrator',
+      });
+
+      // Intención persistida (se relee en cada turno; sobrevive a chats y cambios de modelo).
+      let sessionIntentions: Awaited<ReturnType<typeof getSessionIntentions>> | null = null;
+      try {
+        sessionIntentions = await getSessionIntentions({ sessionId: agentSessionId });
+      } catch {
+        sessionIntentions = null;
+      }
+
+      let metacognitionLessons: string[] = [];
+      try {
+        const lessons = await getMetacognitionLessons({
+          sessionId: agentSessionId,
+          agentKey: identity.agentKey,
+        });
+        metacognitionLessons = selectRelevantLessons(
+          lessons.map((lesson) => ({ lesson: lesson.lesson, status: lesson.status })),
+          message
+        );
+      } catch {
+        metacognitionLessons = [];
+      }
+
+      systemPrompt = buildAgentSystemPrompt(identity, {
+        sessionId,
+        tools: agentTools,
+        intentions: sessionIntentions,
+        metacognitionLessons,
+      });
+      intentionReminder = buildIntentionReminder(identity, sessionIntentions) ?? undefined;
       agentIdentity = identity;
     } else {
       const requestedChatId = chatIdFromBody as string;
@@ -665,115 +904,18 @@ export async function POST(req: Request) {
       chatId,
       message,
       mode,
-      model: body.model === 'mock' ? undefined : body.model,
       agentId,
       area,
       subArea,
       systemPrompt,
+      ...(intentionReminder ? { intentionReminder } : {}),
       ...(summaryText ? { summary: summaryText } : {}),
       messages: contextMessages.length > 0 ? contextMessages : undefined,
       maxContextChars: BRIDGE_CONTEXT_MAX_CHARS,
     };
 
-    /**
-     * S05: enrutado determinista por intención. Evita depender de que Venice emita el
-     * bloque de tool. Solo aplica al orquestador y con señales de alta confianza.
-     */
-    const detectedIntent =
-      mode === 'agent' && agentTools.length > 0 ? detectIntent(message) : ({ kind: 'none' } as const);
-
-    if (detectedIntent.kind === 'read') {
-      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
-      const outcome = await executeAgentTool(call, { sessionId: agentSessionId });
-
-      try {
-        const data = outcome.ok ? (outcome.data as any) : undefined;
-        await recordAgentToolCall({
-          chatId,
-          sessionId: agentSessionId,
-          agentKey: agentAuthorId ?? 'agent',
-          tool: outcome.tool,
-          args: call.args,
-          ok: outcome.ok,
-          error: outcome.ok ? undefined : outcome.error,
-          runId: typeof data?.runId === 'string' ? data.runId : undefined,
-          activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
-        });
-      } catch {
-        // La traza no debe romper la respuesta.
-      }
-
-      const reply = summarizeToolOutcome(outcome);
-      const meta = buildTurnMeta({
-        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
-        tools: [{ tool: outcome.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
-      });
-      try {
-        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
-      } catch (err) {
-        return errorResponse(502, 'CONVEX_ERROR', 'Tool ejecutada pero falló al persistir la respuesta.', {
-          retryable: true,
-          details: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        mode,
-        chatId,
-        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
-        reply,
-        toolCalls: [
-          {
-            tool: outcome.tool,
-            args: call.args,
-            ok: outcome.ok,
-            ...(outcome.ok ? {} : { error: outcome.error }),
-          },
-        ],
-        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
-        meta,
-      });
-    }
-
-    if (detectedIntent.kind === 'proposal' || detectedIntent.kind === 'control') {
-      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
-      const summary = describeToolProposal(call);
-      const reply = [
-        `Propongo ejecutar \`${call.tool}\`:`,
-        summary,
-        '',
-        'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
-      ].join('\n');
-      const meta = buildTurnMeta({
-        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
-        tools: [],
-        proposal: true,
-      });
-
-      try {
-        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
-      } catch (err) {
-        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
-          retryable: true,
-          details: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        mode,
-        chatId,
-        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
-        reply,
-        requiresConfirmation: true,
-        proposal: { tool: call.tool, arguments: call.args, summary },
-        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
-        meta,
-      });
-    }
-
-    const wantsMock = body.model === 'mock';
+    const provider = resolveProvider(body.model);
+    const wantsMock = provider === 'mock';
     if (wantsMock && mode !== 'agent') {
       return errorResponse(400, 'BAD_REQUEST', 'El modelo mock solo existe en modo agente.');
     }
@@ -782,15 +924,33 @@ export async function POST(req: Request) {
     }
 
     const callModel = async (modelInput: BridgeInput) => {
-      if (wantsMock) {
+      if (provider === 'mock') {
         return {
           ok: true as const,
           text: buildMockAgentReply(agentIdentity, modelInput.message, contextMessages.length),
         };
       }
-      return modelInput.model === 'venice'
-        ? await callVeniceInference(modelInput)
-        : await callOpenClawBridge(modelInput);
+      if (provider === 'openai') {
+        const config = readInferenceConfig();
+        if (!config.ok) {
+          return {
+            ok: false as const,
+            code: 'INFERENCE_CONFIG_MISSING' as const,
+            message: `Falta configuración de inferencia: ${config.missing.join(', ')}.`,
+            retryable: false,
+          };
+        }
+        return await callOpenAICompatible({
+          config: config.config,
+          messages: buildChatMessages(modelInput),
+          temperature: inferenceTemperature(),
+        });
+      }
+      if (provider === 'venice') return await callVeniceInference(modelInput);
+      return await callOpenClawBridge({
+        ...modelInput,
+        model: body.model === 'opus' ? 'opus' : 'codex',
+      });
     };
 
     const result = await callModel(input);
@@ -808,7 +968,13 @@ export async function POST(req: Request) {
      * Arquitecto: parser de siempre (JSON de ignición).
      */
     const toolCalls: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; error?: string }> = [];
-    let pendingProposal: { tool: string; arguments: Record<string, unknown>; summary: string } | null = null;
+    let pendingProposal: {
+      id: string;
+      expiresAt: number;
+      tool: string;
+      arguments: Record<string, unknown>;
+      summary: string;
+    } | null = null;
     let agentFinalText = result.text.trim();
 
     if (mode === 'agent' && agentTools.length > 0) {
@@ -816,13 +982,88 @@ export async function POST(req: Request) {
 
       if (parsedCall.kind === 'call') {
         const callDef = getAgentTool(parsedCall.call.tool);
+        const harnessScope = agentIdentity?.persona.harnessType ?? null;
+        const toolScope = {
+          authorized: agentIdentity?.persona.authorized ?? false,
+          orchestrator: agentIdentity?.persona.kind === 'orchestrator',
+        };
 
-        if (callDef?.kind === 'write') {
+        if (!callDef || !isToolAllowedForAgent(callDef.name, harnessScope, toolScope)) {
+          agentFinalText = 'Esa herramienta no está disponible para este agente.';
+        } else if (callDef.kind === 'write') {
+          if (callDef.direct) {
+            // Escrituras de intención: el mensaje del usuario es la instrucción; se aplican en el turno.
+            const outcome = await executeConfirmedAgentTool(parsedCall.call, {
+              sessionId: agentSessionId,
+              harnessType: harnessScope,
+              agentKey: agentAuthorId ?? 'agent',
+            });
+            toolCalls.push({
+              tool: outcome.tool,
+              args: parsedCall.call.args,
+              ok: outcome.ok,
+              ...(outcome.ok ? {} : { error: outcome.error }),
+            });
+            try {
+              await recordAgentToolCall({
+                chatId,
+                sessionId: agentSessionId,
+                agentKey: agentAuthorId ?? 'agent',
+                tool: outcome.tool,
+                args: parsedCall.call.args,
+                ok: outcome.ok,
+                error: outcome.ok ? undefined : outcome.error,
+              });
+            } catch {
+              // La traza no debe romper la respuesta.
+            }
+            agentFinalText = summarizeConfirmedToolOutcome(outcome);
+          } else {
+          const requestedHarness =
+            typeof parsedCall.call.args.harnessType === 'string'
+              ? parsedCall.call.args.harnessType.trim()
+              : '';
+          const requestedActivity =
+            typeof parsedCall.call.args.activity === 'string'
+              ? parsedCall.call.args.activity.trim()
+              : '';
+          const wrongHarness = Boolean(harnessScope && requestedHarness && requestedHarness !== harnessScope);
+          const wrongActivity = Boolean(
+            harnessScope && requestedActivity && !isActivityForHarness(harnessScope, requestedActivity)
+          );
+
+          if (wrongHarness || wrongActivity) {
+            agentFinalText = wrongHarness
+              ? `Solo puedes asignar actividades del arnés \`${harnessScope}\`.`
+              : `La actividad \`${requestedActivity}\` no pertenece al arnés \`${harnessScope}\`.`;
+          } else {
           // S02b: nunca se ejecuta aquí. Se devuelve una propuesta y el operador confirma en la UI.
-          const summary = describeToolProposal(parsedCall.call);
+          // En un agente de arnés, el servidor fija su arnés en la propuesta (auditoría/summary).
+          const proposalArgs = harnessScope
+            ? { ...parsedCall.call.args, harnessType: harnessScope }
+            : parsedCall.call.args;
+          const summary = describeToolProposal({ tool: parsedCall.call.tool, args: proposalArgs });
+          let createdProposal: { proposalId: string; expiresAt: number };
+          try {
+            createdProposal = await createAgentToolProposal({
+              chatId,
+              agentKey: agentAuthorId ?? '',
+              tool: parsedCall.call.tool,
+              args: proposalArgs,
+              summary,
+            });
+          } catch (err) {
+            return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
+              retryable: true,
+              details: err instanceof Error ? err.message : String(err),
+            });
+          }
+
           pendingProposal = {
+            id: createdProposal.proposalId,
+            expiresAt: createdProposal.expiresAt,
             tool: parsedCall.call.tool,
-            arguments: parsedCall.call.args,
+            arguments: proposalArgs,
             summary,
           };
           agentFinalText = [
@@ -831,8 +1072,14 @@ export async function POST(req: Request) {
             '',
             'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
           ].join('\n');
+          }
+          }
         } else {
-          const outcome = await executeAgentTool(parsedCall.call, { sessionId: agentSessionId });
+          const outcome = await executeAgentTool(parsedCall.call, {
+            sessionId: agentSessionId,
+            harnessType: harnessScope,
+            agentKey: agentAuthorId ?? 'agent',
+          });
           toolCalls.push({
             tool: outcome.tool,
             args: parsedCall.call.args,
@@ -857,9 +1104,42 @@ export async function POST(req: Request) {
             // La traza no debe romper la respuesta.
           }
 
-          // Respuesta determinista: Venice no resume de forma fiable datos estructurados
-          // y mezcla estados de mensajes anteriores. La tool es la fuente de verdad.
-          agentFinalText = summarizeToolOutcome(outcome);
+          // Resultado real bajo demanda: se lo damos al modelo para que lo interprete
+          // (una sola continuación, sin ciclos). Las demás lecturas siguen deterministas.
+          if (parsedCall.call.tool === 'get_activity_result' && outcome.ok) {
+            const resultJson = JSON.stringify(outcome.data, null, 2);
+            const capped =
+              resultJson.length > 16000
+                ? `${resultJson.slice(0, 16000)}\n…(resultado truncado)`
+                : resultJson;
+            const nowIso = new Date().toISOString();
+            const followUpInput: BridgeInput = {
+              ...input,
+              summary: undefined,
+              messages: [
+                { authorType: 'human', authorId: 'user', content: message, createdAt: nowIso },
+                {
+                  authorType: 'agent',
+                  authorId: agentAuthorId ?? 'agent',
+                  content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
+                  createdAt: nowIso,
+                },
+              ],
+              message: [
+                `[Resultado real de la herramienta ${parsedCall.call.tool}]`,
+                capped,
+                '',
+                'Interpreta este resultado real para el usuario: qué encontró, qué significa y cuál es el siguiente paso. No inventes datos.',
+              ].join('\n'),
+            };
+            const followUp = await callModel(followUpInput);
+            agentFinalText = followUp.ok
+              ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
+              : `${summarizeToolOutcome(outcome)}\n\n(No pude interpretar el resultado con el modelo: ${followUp.message})`;
+          } else {
+            // Respuesta determinista para listados/errores; la tool es la fuente de verdad.
+            agentFinalText = summarizeToolOutcome(outcome);
+          }
         }
       } else if (parsedCall.kind === 'invalid') {
         agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;
@@ -1004,6 +1284,7 @@ export async function POST(req: Request) {
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(pendingProposal ? { requiresConfirmation: true, proposal: pendingProposal } : {}),
       ...(turnMeta ? { meta: turnMeta } : {}),
+      provider,
       reply: displayText,
       ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),

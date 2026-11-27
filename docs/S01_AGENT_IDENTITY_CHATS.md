@@ -75,7 +75,7 @@ En modo agente `architectPayload` nunca se envía y no se toca `chatIgnitionDraf
 
 `src/modules/agents/agentPersonas.ts` resuelve el arnés en este orden:
 `meta.harnessType` → `meta.harness` → `agentKey` exacto → prefijo `support:`/`b2b-`/etc.
-Si no hay arnés, el agente se trata como **orquestador** (sin herramientas inventadas).
+Si no hay arnés ni rol de orquestador explícito, el agente registrado queda como **genérico**: puede conversar, pero no recibe tools de orquestador ni de arnés. Un `agentKey` que no existe en la sesión se rechaza en la resolución del chat (404).
 
 Las capacidades se generan desde el catálogo real (`convex/lib/harnessActivities.ts`), y los
 límites dejan explícito que:
@@ -182,3 +182,21 @@ repetir el paso 2 sin `model: "mock"`; ese es el camino real.
 - **S02**: orquestador con herramientas reales (routing y capacidades ejecutables).
 - **S03**: conectar el orquestador con Swarmy (eventos/actividades por conversación).
 - **S04**: retirar duplicidades confirmadas y simplificar la UI.
+
+
+## Sesión dedicada `Avril · Swarmy` (dev)
+
+Registro preparado para los cuatro arneses, sin tocar los agentes legacy:
+
+- Session: `m97277rgqhezjj37a16w7rr6gd8k1m0c`
+- Chat: `jx7crmxx2r5aq6d5bzxa36tt6s8k0w7c`
+- Organización: `md74cex8bajvg36mj1att3hr218bd7tr`
+- `swarm-strategy` · Orquestador · rol `orchestrator` · `meta.orchestrator=true`
+- `support` · Soporte · rol `support` · `meta.harnessType=support`
+- `b2b` · B2B · rol `b2b` · `meta.harnessType=b2b`
+- `prospecting` · Prospección · rol `prospecting` · `meta.harnessType=prospecting`
+- `marketing` · Marketing · rol `marketing` · `meta.harnessType=marketing`
+
+El registro es reproducible con `npm run swarmy:register -- --session-id=<id>`
+(ver `AVRIL_SWARMY_REGISTRATION.md`). No se habilitó metacognición, no se definieron
+intenciones y no se arrancó el worker.

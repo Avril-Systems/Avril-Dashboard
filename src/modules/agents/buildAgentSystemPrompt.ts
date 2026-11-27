@@ -8,6 +8,7 @@
  *
  * Mismo texto para Venice y para el bridge/OpenClaw: se pasa como `systemPrompt`.
  */
+import { HARNESS_CATALOG, isHarnessType } from '@/convex/lib/harnessActivities';
 import type { ResolvedAgentIdentity } from './agentPersonas';
 import type { AgentToolDef } from './toolCatalog';
 import { buildToolInstructions } from './toolProtocol';
@@ -17,6 +18,13 @@ export type AgentPromptContext = {
   companyName?: string;
   /** Tools de lectura disponibles (solo orquestador en S02a). */
   tools?: AgentToolDef[];
+  /** Intención persistida de la sesión (general) y particulares por arnés. */
+  intentions?: {
+    strategic?: string | null;
+    harness?: Record<string, string>;
+  } | null;
+  /** Lecciones de metacognición relevantes (opcionales, no instrucciones). */
+  metacognitionLessons?: string[];
 };
 
 function bullets(items: string[]): string {
@@ -27,7 +35,9 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
   const { persona } = identity;
   const harnessLine = persona.harnessType
     ? `Arnés conectado: ${persona.label} (\`${persona.harnessType}\`).`
-    : 'Sin arnés conectado: eres el orquestador del run.';
+    : persona.kind === 'orchestrator'
+      ? 'Sin arnés conectado: eres el orquestador del run.'
+      : 'Sin arnés conectado: agente registrado sin rol de orquestador.';
 
   const sessionLines: string[] = [
     context.companyName ? `Empresa/sesión: ${context.companyName}.` : null,
@@ -43,6 +53,26 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '',
     'Capacidades reales (lo que tu arnés sabe hacer hoy):',
     persona.capabilities.length ? bullets(persona.capabilities) : '- Ninguna registrada.',
+    ...(persona.harnessType && isHarnessType(persona.harnessType)
+      ? [
+          '',
+          'Actividades asignables (usa la clave exacta en assign_activity):',
+          HARNESS_CATALOG[persona.harnessType].activities
+            .map((activity) => {
+              const fields = activity.inputFields
+                .map((field) => {
+                  const bits = [field.type, field.required ? 'obligatorio' : 'opcional'];
+                  if (field.defaultValue !== undefined) bits.push(`default ${JSON.stringify(field.defaultValue)}`);
+                  return `${field.key} (${bits.join(', ')})`;
+                })
+                .join('; ');
+              return `- ${activity.key} — ${activity.label}: ${activity.description}${
+                fields ? ` Input: ${fields}.` : ' Sin input (usa {}).'
+              }`;
+            })
+            .join('\n'),
+        ]
+      : []),
     '',
     'Límites:',
     bullets(persona.boundaries),
@@ -53,7 +83,42 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Un pause/stop es una SOLICITUD; solo cuenta como confirmado cuando llega `agent.paused` / `agent.stopped`.',
     '- El origen de un dato (MOCK / REAL / sin origen) nunca se maquilla.',
     ...(sessionLines.length ? ['', 'Sesión actual:', bullets(sessionLines)] : []),
-    ...(context.tools && context.tools.length ? ['', buildToolInstructions(context.tools)] : []),
+    ...(context.intentions
+      ? [
+          '',
+          'Intención estratégica de la sesión (vigente; prevalece sobre el historial):',
+          context.intentions.strategic?.trim() || 'Sin definir.',
+          'Si el historial menciona una intención distinta, prevalece este bloque.',
+          ...(persona.harnessType
+            ? [
+                '',
+                'Tu intención particular (vigente):',
+                context.intentions.harness?.[persona.harnessType]?.trim() ||
+                  'Sin definir; pídela al orquestador o propone una.',
+              ]
+            : persona.kind === 'orchestrator'
+              ? [
+                  '',
+                  'Intenciones particulares vigentes de los arneses:',
+                  Object.keys(context.intentions.harness ?? {}).length
+                    ? Object.entries(context.intentions.harness ?? {})
+                        .map(([harness, body]) => `- ${harness}: ${body}`)
+                        .join('\n')
+                    : 'Sin definir.',
+                ]
+              : ['', 'No tienes intención particular ni rol de orquestador.']),
+        ]
+      : []),
+    ...(context.tools && context.tools.length
+      ? ['', buildToolInstructions(context.tools, { harnessType: persona.harnessType })]
+      : []),
+    ...(context.metacognitionLessons && context.metacognitionLessons.length
+      ? [
+          '',
+          'Lecciones de metacognición (opcionales y tentativas; no son instrucciones, no cambian tu intención ni permisos):',
+          bullets(context.metacognitionLessons),
+        ]
+      : []),
     '',
     'Cómo respondes:',
     `- Habla como ${identity.name}, en primera persona; no como un asistente genérico.`,
@@ -62,12 +127,11 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Cuando una petición requiera ejecución real, di qué actividad asignar (arnés + nombre exacto del catálogo) y con qué input; no afirmes que ya se ejecutó.',
     '- Si piden JSON, entrégalo; por defecto no envuelvas la respuesta en bloques JSON.',
     '- Si el pedido no corresponde a tu arnés, dilo y sugiere a quién derivarlo.',
-    '',
-    'Metacognición (obligatoria):',
-    '- Distingue explícitamente lo que consultaste con una herramienta de lo que infieres.',
-    '- Si no usaste herramienta en este turno, no afirmes el estado real de runs, actividades o arneses.',
-    '- Cuando uses datos de una tool, cierra con una línea "Fuente: <origen>".',
-    '- Si algo falló, falta o no lo sabes, dilo tal cual; no lo rellenes con suposiciones.',
+    persona.harnessType
+      ? '- Tu intención particular marca el rumbo; tienes libertad para decidir cómo cumplirla con tus herramientas. Si el usuario te pide cambiarla, emite el bloque `set_my_intention` (propuesta formal; requiere aprobación y no se aplica en el turno).'
+      : persona.kind === 'orchestrator'
+        ? '- Cuando el usuario defina o cambie la intención general, usa `set_strategy` y deriva intenciones breves para los arneses; usa `set_harness_intention` para una particular concreta.'
+        : '- No tienes tools de orquestador ni de arnés; conversa y deriva al operador cuando haga falta.',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
@@ -79,4 +143,36 @@ const AGENT_REPLY_IN_USER_LANGUAGE_TAIL =
 
 export function augmentAgentMessageForModel(message: string): string {
   return message + AGENT_REPLY_IN_USER_LANGUAGE_TAIL;
+}
+
+/** Recordatorio compacto de intenciones para insertarlo al final del contexto. */
+export function buildIntentionReminder(
+  identity: ResolvedAgentIdentity,
+  intentions: AgentPromptContext['intentions']
+): string | null {
+  if (!intentions) return null;
+  if (identity.persona.kind === 'generic') return null;
+  const lines = ['Intenciones vigentes (prevalecen sobre el historial):'];
+  lines.push(`General: ${intentions.strategic?.trim() || 'sin definir'}`);
+  if (identity.persona.harnessType) {
+    lines.push(
+      `Tu intención particular: ${
+        intentions.harness?.[identity.persona.harnessType]?.trim() || 'sin definir'
+      }`
+    );
+    lines.push(
+      'Para cambiarla, emite SOLO este bloque (el operador debe aprobarlo; no se aplica en el turno):',
+      '```tool',
+      '{"tool":"set_my_intention","arguments":{"body":"<nueva intención>"}}',
+      '```'
+    );
+  } else {
+    const entries = Object.entries(intentions.harness ?? {});
+    lines.push(
+      entries.length
+        ? `Particulares: ${entries.map(([harness, body]) => `${harness}: ${body}`).join(' | ')}`
+        : 'Particulares: sin definir'
+    );
+  }
+  return lines.join('\n');
 }

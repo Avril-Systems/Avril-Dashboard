@@ -74,9 +74,10 @@ export function stripToolBlocks(rawText: string): string {
     .trim();
 }
 
-function renderArgs(def: AgentToolDef): string {
-  if (!def.args.length) return 'sin argumentos';
-  return def.args
+function renderArgs(def: AgentToolDef, harnessType?: string | null): string {
+  const args = harnessType ? def.args.filter((arg) => arg.name !== 'harnessType') : def.args;
+  if (!args.length) return 'sin argumentos';
+  return args
     .map((arg) => `${arg.name}: ${arg.type}${arg.required ? ', obligatorio' : ', opcional'} — ${arg.description}`)
     .join('; ');
 }
@@ -94,6 +95,30 @@ export function describeToolProposal(call: ToolCall): string {
         args.input !== undefined ? `\n- Input: ${JSON.stringify(args.input).slice(0, 800)}` : '\n- Input: (defaults del catálogo)';
       return `Asignar la actividad \`${activity}\` al arnés \`${harness}\`${title}.${input}`;
     }
+    case 'set_strategy': {
+      const strategic = typeof args.strategic === 'string' ? args.strategic.trim() : '';
+      const entries = Array.isArray(args.harnessIntentions) ? args.harnessIntentions : [];
+      const lines = entries
+        .map((entry: any) =>
+          entry && typeof entry === 'object' && typeof entry.harnessType === 'string'
+            ? `- ${entry.harnessType}: ${String(entry.body ?? '').slice(0, 200)}`
+            : ''
+        )
+        .filter(Boolean)
+        .join('\n');
+      return [`Intención general: ${strategic || '(sin cambio)'}`, lines ? `Particulares:\n${lines}` : '']
+        .filter(Boolean)
+        .join('\n');
+    }
+    case 'set_harness_intention': {
+      const harness = typeof args.harnessType === 'string' ? args.harnessType : '?';
+      const body = typeof args.body === 'string' ? args.body.trim() : '';
+      return `Actualizar intención de \`${harness}\`: ${body || '(vacía)'}`;
+    }
+    case 'set_my_intention': {
+      const body = typeof args.body === 'string' ? args.body.trim() : '';
+      return `Actualizar mi intención: ${body || '(vacía)'}`;
+    }
     case 'request_control': {
       const runId = typeof args.runId === 'string' ? args.runId : '?';
       const agentKey = typeof args.agentKey === 'string' ? args.agentKey : '?';
@@ -106,7 +131,10 @@ export function describeToolProposal(call: ToolCall): string {
 }
 
 /** Sección del system prompt con las tools disponibles y el formato exacto. */
-export function buildToolInstructions(tools: AgentToolDef[]): string {
+export function buildToolInstructions(
+  tools: AgentToolDef[],
+  options: { harnessType?: string | null } = {}
+): string {
   if (!tools.length) return '';
 
   const readTools = tools.filter((tool) => tool.kind === 'read');
@@ -122,11 +150,18 @@ export function buildToolInstructions(tools: AgentToolDef[]): string {
     'Herramientas disponibles (datos y acciones reales; no inventes resultados):',
   ];
 
+  if (options.harnessType) {
+    sections.push(
+      '',
+      `Alcance: solo tu arnés \`${options.harnessType}\`. No puedes consultar ni asignar actividades de otros arneses.`
+    );
+  }
+
   if (readTools.length) {
     sections.push(
       '',
       'LECTURA (se ejecutan en tu turno):',
-      readTools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n')
+      readTools.map((tool) => `- ${tool.name}(${renderArgs(tool, options.harnessType)}) — ${tool.description}`).join('\n')
     );
   }
 
@@ -134,7 +169,7 @@ export function buildToolInstructions(tools: AgentToolDef[]): string {
     sections.push(
       '',
       'ESCRITURA (requieren confirmación explícita del operador; el servidor NO las ejecuta en tu turno):',
-      writeTools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n')
+      writeTools.map((tool) => `- ${tool.name}(${renderArgs(tool, options.harnessType)}) — ${tool.description}`).join('\n')
     );
   }
 
@@ -146,10 +181,37 @@ export function buildToolInstructions(tools: AgentToolDef[]): string {
     example,
     '- Usa exactamente los nombres y argumentos listados. El servidor valida el bloque; si falta un argumento, no se ejecuta.',
     '- Las de LECTURA se ejecutan y te devuelven el dato real; después responderás al usuario en lenguaje natural.',
+    '- Si el usuario pide ejecutar, preparar o encolar una actividad, usa `assign_activity`. Usa `list_activities` solo para consultar estado.',
+    '- Usa `get_activity_result` solo para UNA actividad concreta (interpretar qué encontró); no cargues todos los resultados.',
     '- Las de ESCRITURA NO se ejecutan: el servidor devuelve una propuesta y el operador la confirma en la UI. Nunca digas que ya se ejecutó.',
     '- Nunca inventes cifras, estados, runIds ni resultados. Si la herramienta falla, dilo tal cual.',
     '- Para acciones destructivas (kill/stop) o que crean runs, explica qué hará la propuesta y deja que el operador confirme.'
   );
+
+  const names = new Set(tools.map((tool) => tool.name));
+  if (names.has('set_strategy') || names.has('set_my_intention')) {
+    sections.push(
+      '',
+      'Intención estratégica (texto breve, ≤600 caracteres; no es una orden de ejecución):',
+      ...(names.has('set_strategy')
+        ? [
+            '- Usa `set_strategy` cuando el usuario defina o cambie la intención general; deriva en la misma llamada una intención breve para cada arnés.',
+            '- Usa `set_harness_intention` para cambiar una intención particular concreta.',
+            '- Si el usuario pide cambiar la intención, responde SOLO con el bloque de herramienta; no la cambies solo en texto ni digas que la actualizaste sin ejecutarla.',
+          ]
+        : []),
+      ...(names.has('set_my_intention')
+        ? ['- Usa `set_my_intention` solo si el usuario te pide explícitamente cambiar tu intención.',
+           '- Es una PROPUESTA formal: responde SOLO con el bloque, sin texto antes ni después. El operador la confirma o rechaza; no se aplica en el turno.',
+           '```tool',
+           '{"tool":"set_my_intention","arguments":{"body":"<nueva intención breve>"}}',
+           '```',
+           '- No describas la propuesta solo en texto: sin bloque, el operador no puede aprobarla.',
+           '- Tu intención particular está en el prompt; decide libremente cómo cumplirla con tus herramientas.']
+        : []),
+      '- No conviertas la intención en un plan rígido ni exijas evidencia: es rumbo, no una tarea cerrada.'
+    );
+  }
 
   return sections.join('\n');
 }

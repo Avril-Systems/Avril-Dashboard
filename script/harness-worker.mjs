@@ -42,7 +42,12 @@ Necesita en .env.local (o el entorno):
   SWARMY_TENANT_ID
   SWARMY_WORKSPACE_ID
 Opcional:
-  GITHUB_TOKEN  (sube el límite de la API de GitHub para prospección)`);
+  GITHUB_TOKEN  (sube el límite de la API de GitHub para prospección)
+
+Scheduler de metacognición (opcional; si falta, el worker sigue operando):
+  NEXT_PUBLIC_APP_URL | METACOGNITION_APP_URL
+  DASHBOARD_APP_TOKEN
+  METACOGNITION_INTERVAL_MS (default 3600000)`);
   process.exit(0);
 }
 
@@ -73,6 +78,16 @@ if (missing.length) {
   console.error(`ERROR: falta configuración: ${missing.map(([name]) => name).join(', ')}`);
   process.exit(1);
 }
+
+const APP_URL = (process.env.METACOGNITION_APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+const DASHBOARD_TOKEN = process.env.DASHBOARD_APP_TOKEN || '';
+const METACOGNITION_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.METACOGNITION_INTERVAL_MS) || 60 * 60 * 1000
+);
+let lastMetacognitionAt = 0;
+let metacognitionWarning = false;
+let metacognitionRunning = false;
 
 const client = new ConvexHttpClient(CONVEX_URL);
 const api = anyApi.serverOrchestration;
@@ -116,6 +131,71 @@ async function heartbeat(force = false) {
       }
     })
   );
+}
+
+/**
+ * Scheduler periódico de metacognición: usa el runtime existente del worker.
+ * El endpoint del Dashboard aplica cadencia/lease por agente; aquí solo se
+ * descubren los objetivos habilitados y se disparan.
+ */
+async function runMetacognitionScheduler(force = false) {
+  if (metacognitionRunning) return;
+  if (!APP_URL || !DASHBOARD_TOKEN) {
+    if (!metacognitionWarning) {
+      console.log(
+        'Aviso: scheduler de metacognición sin NEXT_PUBLIC_APP_URL/METACOGNITION_APP_URL o DASHBOARD_APP_TOKEN; se omite.'
+      );
+      metacognitionWarning = true;
+    }
+    return;
+  }
+  if (!force && Date.now() - lastMetacognitionAt < METACOGNITION_INTERVAL_MS) return;
+  lastMetacognitionAt = Date.now();
+  metacognitionRunning = true;
+
+  try {
+    let targets = [];
+    try {
+      targets = await client.query(anyApi.serverMetacognition.listEnabledMetacognitionTargetsServer, {
+        serverSecret: SERVER_SECRET,
+      });
+    } catch (err) {
+      log('metacognition', `no se pudieron listar objetivos: ${sanitizeError(err)}`);
+      return;
+    }
+
+    for (const target of targets ?? []) {
+      try {
+        const res = await fetch(`${APP_URL}/api/orchestration/metacognition/run`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-dashboard-token': DASHBOARD_TOKEN,
+          },
+          body: JSON.stringify({ sessionId: target.sessionId, agentKey: target.agentKey }),
+          signal: AbortSignal.timeout(45_000),
+        });
+        const text = await res.text();
+        let payload = null;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          // respuesta no JSON: se registra el texto acotado
+        }
+        const result = payload?.results?.[0];
+        log(
+          'metacognition',
+          `${target.agentKey}: ${res.status} ${
+            result ? `${result.status}${result.reason ? ` (${result.reason})` : ''}` : text.slice(0, 120)
+          }`
+        );
+      } catch (err) {
+        log('metacognition', `${target.agentKey}: ${sanitizeError(err)}`);
+      }
+    }
+  } finally {
+    metacognitionRunning = false;
+  }
 }
 
 async function claimNext(harness) {
@@ -249,6 +329,8 @@ async function main() {
   }
 
   await heartbeat(true);
+  if (ONCE) await runMetacognitionScheduler(true);
+  else void runMetacognitionScheduler(true);
 
   if (ONCE) {
     let processed = 0;
@@ -269,6 +351,7 @@ async function main() {
 
   while (!stopping) {
     await heartbeat();
+    void runMetacognitionScheduler();
     let did = false;
     for (const harness of selected) {
       if (stopping) break;

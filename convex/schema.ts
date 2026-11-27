@@ -246,7 +246,9 @@ export default defineSchema({
     /** Metacognición del turno (S06): fuentes, confianza, límites. Solo en respuestas de agente. */
     meta: v.optional(v.any()),
     createdAt: v.string(),
-  }).index('by_chat', ['chatId']),
+  })
+    .index('by_chat', ['chatId'])
+    .index('by_chat_createdAt', ['chatId', 'createdAt']),
   /** Latest Avril chat → ignition export for this thread (full demo path). */
   chatIgnitionDrafts: defineTable({
     organizationId: v.id('organizations'),
@@ -265,6 +267,36 @@ export default defineSchema({
    * Traza persistida de las tools del orquestador (S03): qué consultó/ejecutó,
    * resultado y a qué run/actividad apuntó. Sobrevive a recargas y es auditable.
    */
+  /**
+   * Propuestas de ejecución persistidas (S02b punto 2): la confirmación se vincula
+   * a este id y solo puede consumirse una vez (claim atómico).
+   */
+  agentToolProposals: defineTable({
+    chatId: v.id('chats'),
+    sessionId: v.id('orchestrationSessions'),
+    organizationId: v.id('organizations'),
+    agentKey: v.string(),
+    tool: v.string(),
+    args: v.any(),
+    summary: v.string(),
+    status: v.union(
+      v.literal('pending'),
+      v.literal('executing'),
+      v.literal('executed'),
+      v.literal('failed'),
+      v.literal('cancelled'),
+      v.literal('expired')
+    ),
+    result: v.optional(v.any()),
+    error: v.optional(v.string()),
+    createdAt: v.string(),
+    expiresAt: v.number(),
+    claimedAt: v.optional(v.string()),
+    finishedAt: v.optional(v.string()),
+  })
+    .index('by_chat', ['chatId'])
+    .index('by_session', ['sessionId'])
+    .index('by_status', ['status']),
   agentToolCalls: defineTable({
     chatId: v.id('chats'),
     sessionId: v.id('orchestrationSessions'),
@@ -279,6 +311,78 @@ export default defineSchema({
   })
     .index('by_chat', ['chatId'])
     .index('by_session', ['sessionId']),
+  /**
+   * Intención estratégica (una por sesión) y particulares por arnés.
+   * Texto breve, persistente, editable por conversación; no es una orden de ejecución.
+   */
+  intentions: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    organizationId: v.id('organizations'),
+    scope: v.union(v.literal('strategic'), v.literal('harness')),
+    harnessType: v.optional(v.string()),
+    body: v.string(),
+    source: v.union(v.literal('user'), v.literal('orchestrator'), v.literal('harness')),
+    updatedBy: v.optional(v.string()),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  })
+    .index('by_session', ['sessionId'])
+    .index('by_session_scope', ['sessionId', 'scope'])
+    .index('by_session_harness', ['sessionId', 'harnessType']),
+  /** Metacognition v0.1: estado por agente (habilitado, cadencia, cursor, lease). */
+  metacognitionStates: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    organizationId: v.id('organizations'),
+    enabled: v.boolean(),
+    cadenceMs: v.number(),
+    lastCycleAt: v.optional(v.string()),
+    lastProcessedAt: v.optional(v.string()),
+    leaseOwner: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    lastStatus: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  })
+    .index('by_session_agent', ['sessionId', 'agentKey'])
+    .index('by_session', ['sessionId'])
+    .index('by_enabled', ['enabled']),
+  /** Lecciones privadas por agente; histórico con retiro, nunca se reescribe. */
+  metacognitionLessons: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    organizationId: v.id('organizations'),
+    lesson: v.string(),
+    status: v.union(v.literal('tentative'), v.literal('observed')),
+    sourceCycleId: v.string(),
+    experienceRefs: v.optional(v.array(v.string())),
+    createdAt: v.string(),
+    retiredAt: v.optional(v.string()),
+  })
+    .index('by_session_agent', ['sessionId', 'agentKey'])
+    .index('by_session_agent_created', ['sessionId', 'agentKey', 'createdAt']),
+  /** Intentos de ciclo (uno por claim); incluye skipped/failed. */
+  metacognitionCycles: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    organizationId: v.id('organizations'),
+    status: v.union(
+      v.literal('running'),
+      v.literal('success'),
+      v.literal('skipped'),
+      v.literal('failed')
+    ),
+    inferenceCalls: v.number(),
+    inputCount: v.number(),
+    cursorAfter: v.optional(v.string()),
+    model: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.string(),
+    finishedAt: v.optional(v.string()),
+  })
+    .index('by_session_agent', ['sessionId', 'agentKey'])
+    .index('by_status', ['status']),
   wallets: defineTable({ organizationId: v.id('organizations'), ownerUserId: v.id('users'), provider: v.string(), address: v.string(), createdAt: v.string() }).index('by_org', ['organizationId']),
   walletPermissions: defineTable({ walletId: v.id('wallets'), memberUserId: v.id('users'), permission: v.union(v.literal('view'), v.literal('propose'), v.literal('execute'), v.literal('approve')), createdAt: v.string() }).index('by_wallet_user', ['walletId', 'memberUserId']),
   approvals: defineTable({
@@ -391,6 +495,7 @@ export default defineSchema({
     .index("by_tenant_activity", ["tenantId", "activityId"])
     .index("by_tenant_status", ["tenantId", "status"])
     .index("by_tenant_harness_status", ["tenantId", "harnessType", "status"])
+    .index("by_tenant_harness_createdAt", ["tenantId", "harnessType", "createdAt"])
     .index("by_tenant_run", ["tenantId", "runId"])
     .index("by_tenant_createdAt", ["tenantId", "createdAt"]),
 });

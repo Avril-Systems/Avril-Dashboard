@@ -43,6 +43,7 @@ const SOURCES: Record<string, string> = {
   list_activities: 'Swarmy · harnessActivities',
   harness_health: 'Swarmy · orchestratorConnections (heartbeats)',
   list_agents: 'Convex · orchestrationAgents',
+  get_activity_result: 'Swarmy · harnessActivities.result',
   assign_activity: 'Swarmy · harnessActivities (cola durable)',
   request_control: 'Swarmy · orchestratorEvents (agent.command.sent)',
 };

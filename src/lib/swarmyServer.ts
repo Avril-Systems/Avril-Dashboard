@@ -15,7 +15,7 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { anyApi } from 'convex/server';
 import { NextResponse } from 'next/server';
-import { getClientIp, hitRateLimit, requireDashboardToken } from '@/src/lib/apiSecurity';
+import { getClientIp, hitRateLimit, swarmyOperatorStatus } from '@/src/lib/apiSecurity';
 
 export class SwarmyConfigError extends Error {
   missing: string[];
@@ -119,8 +119,15 @@ export async function sendRunCommand(input: { runId: string; agentKey: string; c
 
 /** Autenticación + rate limit comunes. Devuelve una respuesta de error o null si todo bien. */
 export function guardRequest(req: Request, bucket: string, limit: number): Response | null {
-  if (!requireDashboardToken(req)) {
+  const operator = swarmyOperatorStatus(req);
+  if (operator === 'unauthenticated') {
     return NextResponse.json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, { status: 401 });
+  }
+  if (operator === 'forbidden') {
+    return NextResponse.json(
+      { ok: false, error: { code: 'OPERATOR_REQUIRED', message: 'Se requiere un operador autorizado.' } },
+      { status: 403 }
+    );
   }
   if (hitRateLimit(`swarmy:${bucket}:${getClientIp(req)}`, limit)) {
     return NextResponse.json({ ok: false, error: { code: 'RATE_LIMITED', message: 'Rate limit exceeded' } }, { status: 429 });
@@ -191,6 +198,17 @@ export async function listTenantActivities(input: {
     includeResult: input.includeResult === true,
     limit: input.limit ?? 50,
   })) as HarnessActivityRow[];
+}
+
+/** Resultado completo de UNA actividad persistida (bajo demanda). */
+export async function getHarnessActivityResult(args: { activityId: string }): Promise<HarnessActivityRow | null> {
+  const c = getSwarmyConfig();
+  const client = new ConvexHttpClient(c.url);
+  return (await client.query(anyApi.serverOrchestration.getHarnessActivity, {
+    serverSecret: c.serverSecret,
+    tenantId: c.tenantId,
+    activityId: args.activityId,
+  })) as HarnessActivityRow | null;
 }
 
 export async function listRunActivities(runId: string): Promise<HarnessActivityRow[]> {

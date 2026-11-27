@@ -1,4 +1,4 @@
-import { requireSession } from './sessionAuth';
+import { readSession, requireSession } from './sessionAuth';
 
 const WINDOW_MS = 5 * 60 * 1000;
 
@@ -41,6 +41,28 @@ export function requireDashboardToken(req: Request) {
   }
 
   return false;
+}
+
+/**
+ * Operadores de Swarmy: token de servidor (automatización/ops) o sesión cuyo
+ * wallet esté en SWARMY_OPERATOR_WALLETS. Una sesión autenticada pero no
+ * listada no hereda permisos de operador (fail-closed).
+ */
+export type SwarmyOperatorStatus = 'ok' | 'unauthenticated' | 'forbidden';
+
+export function swarmyOperatorStatus(req: Request): SwarmyOperatorStatus {
+  const expectedToken = process.env.DASHBOARD_APP_TOKEN;
+  const incomingToken = req.headers.get('x-dashboard-token');
+  if (expectedToken && incomingToken && incomingToken === expectedToken) return 'ok';
+
+  const session = readSession(req);
+  if (!session) return 'unauthenticated';
+
+  const allowed = (process.env.SWARMY_OPERATOR_WALLETS ?? '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  return allowed.includes(session.address.toLowerCase()) ? 'ok' : 'forbidden';
 }
 
 export function hitRateLimit(key: string, limit: number) {
