@@ -20,6 +20,12 @@ import {
 } from '@/src/modules/agents/buildAgentSystemPrompt';
 import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
+import { AGENT_TOOLS } from '@/src/modules/agents/toolCatalog';
+import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
+import { parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
+import { executeAgentTool, summarizeToolOutcome } from '@/src/modules/agents/executeAgentTool';
+import type { AgentToolOutcome } from '@/src/modules/agents/executeAgentTool';
+import type { ToolCall } from '@/src/modules/agents/toolProtocol';
 import { parseAvrilAssistantReply } from '@/src/modules/avril/parseAvrilAssistantReply';
 import { extractDraftFromArchitectPayload } from '@/src/modules/avril/extractDraftFromArchitectPayload';
 import { isFolderAgentBriefMessage } from '@/src/lib/orchestrationSwarmGuardrails';
@@ -136,6 +142,17 @@ function buildMockAgentReply(
     `Mensajes previos en este hilo: ${historyCount}.`,
     '',
     'Esto valida identidad, hilo por agente y persistencia. No valida Venice ni el bridge.',
+  ].join('\n');
+}
+
+/** Resultado real de una tool, empaquetado para la segunda llamada al modelo. */
+function buildToolResultMessage(call: ToolCall, outcome: AgentToolOutcome): string {
+  const body = outcome.ok ? JSON.stringify(outcome.data, null, 2) : `ERROR: ${outcome.error}`;
+  return [
+    `[Resultado real de la herramienta ${call.tool}]`,
+    body.slice(0, 8000),
+    '',
+    'Responde al usuario en lenguaje natural usando este dato real. No emitas otro bloque de herramienta.',
   ].join('\n');
 }
 
@@ -405,6 +422,7 @@ export async function POST(req: Request) {
     const sessionId = body.sessionId?.trim();
     const agentKey = body.agentKey?.trim();
     const agentTarget = sessionId && agentKey ? { sessionId, agentKey } : null;
+    const agentSessionId = agentTarget?.sessionId ?? '';
     const message = body.message?.trim();
 
     if ((!chatIdFromBody && !agentTarget) || !message) {
@@ -443,6 +461,7 @@ export async function POST(req: Request) {
     let hasSummary = false;
     let summaryText: string | undefined;
     let agentIdentity: ResolvedAgentIdentity | null = null;
+    let agentTools: AgentToolDef[] = [];
 
     if (agentTarget) {
       let resolved: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
@@ -467,7 +486,9 @@ export async function POST(req: Request) {
         role: resolved.agent.role,
         meta: resolved.agent.meta,
       });
-      systemPrompt = buildAgentSystemPrompt(identity, { sessionId });
+      // S02a: las tools de lectura son capacidad del orquestador (agente sin arnés).
+      agentTools = identity.persona.harnessType === null ? AGENT_TOOLS : [];
+      systemPrompt = buildAgentSystemPrompt(identity, { sessionId, tools: agentTools });
       agentIdentity = identity;
     } else {
       const requestedChatId = chatIdFromBody as string;
@@ -563,11 +584,19 @@ export async function POST(req: Request) {
       return errorResponse(400, 'BAD_REQUEST', 'El modelo mock está deshabilitado en producción.');
     }
 
-    const result = wantsMock
-      ? { ok: true as const, text: buildMockAgentReply(agentIdentity, message, contextMessages.length) }
-      : body.model === 'venice'
-        ? await callVeniceInference(input)
-        : await callOpenClawBridge(input);
+    const callModel = async (modelInput: BridgeInput) => {
+      if (wantsMock) {
+        return {
+          ok: true as const,
+          text: buildMockAgentReply(agentIdentity, modelInput.message, contextMessages.length),
+        };
+      }
+      return modelInput.model === 'venice'
+        ? await callVeniceInference(modelInput)
+        : await callOpenClawBridge(modelInput);
+    };
+
+    const result = await callModel(input);
 
     if (!result.ok) {
       return errorResponse(502, result.code, result.message, {
@@ -576,10 +605,54 @@ export async function POST(req: Request) {
       });
     }
 
-    // En modo agente la respuesta es texto plano: no hay payload de arquitecto ni ignición.
+    /**
+     * Modo agente: texto plano + una tool de lectura opcional (S02a).
+     * El bloque lo valida `parseToolCall`; si el modelo no lo usa, es texto normal.
+     * Arquitecto: parser de siempre (JSON de ignición).
+     */
+    const toolCalls: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; error?: string }> = [];
+    let agentFinalText = result.text.trim();
+
+    if (mode === 'agent' && agentTools.length > 0) {
+      const parsedCall = parseToolCall(result.text);
+
+      if (parsedCall.kind === 'call') {
+        const outcome = await executeAgentTool(parsedCall.call, { sessionId: agentSessionId });
+        toolCalls.push({
+          tool: outcome.tool,
+          args: parsedCall.call.args,
+          ok: outcome.ok,
+          ...(outcome.ok ? {} : { error: outcome.error }),
+        });
+
+        const followUpInput: BridgeInput = {
+          ...input,
+          messages: [
+            ...(input.messages ?? []),
+            {
+              authorType: 'agent',
+              authorId: agentAuthorId ?? 'agent',
+              content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          message: buildToolResultMessage(parsedCall.call, outcome),
+        };
+
+        const followUp = await callModel(followUpInput);
+        agentFinalText = followUp.ok
+          ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
+          : `${summarizeToolOutcome(outcome)}\n\n(No pude redactar el resumen con el modelo: ${followUp.message})`;
+      } else if (parsedCall.kind === 'invalid') {
+        agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;
+      } else {
+        agentFinalText = stripToolBlocks(result.text);
+      }
+    }
+
     const parsed =
       mode === 'agent'
-        ? { displayText: result.text.trim(), architectPayload: null as Record<string, unknown> | null }
+        ? { displayText: agentFinalText, architectPayload: null as Record<string, unknown> | null }
         : parseAvrilAssistantReply(result.text);
     const displayText = parsed.displayText;
     const architectPayload = parsed.architectPayload;
@@ -692,6 +765,7 @@ export async function POST(req: Request) {
       mode,
       chatId,
       ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
       reply: displayText,
       ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),

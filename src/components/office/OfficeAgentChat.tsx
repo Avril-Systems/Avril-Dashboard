@@ -63,6 +63,8 @@ export default function OfficeAgentChat({
   const [sending, setSending] = useState(false);
   const [model, setModel] = useState<ModelChoice>('venice');
   const [pending, setPending] = useState<PendingMessage | null>(null);
+  /** Tool de lectura usada en el último turno (señal visual; no se persiste en S02a). */
+  const [toolNote, setToolNote] = useState<string | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -138,6 +140,7 @@ export default function OfficeAgentChat({
     setChatId(null);
     setError(null);
     setPending(null);
+    setToolNote(null);
     if (!activeAgentKey) return;
 
     setLoading(true);
@@ -174,6 +177,7 @@ export default function OfficeAgentChat({
     setInput('');
     setSending(true);
     setError(null);
+    setToolNote(null);
     setPending({ content: text, at: startedAt });
 
     try {
@@ -195,6 +199,17 @@ export default function OfficeAgentChat({
         return;
       }
       if (typeof data.chatId === 'string') setChatId(data.chatId);
+
+      const calls = Array.isArray(data?.toolCalls)
+        ? (data.toolCalls as Array<{ tool?: string; ok?: boolean }>)
+        : [];
+      if (calls.length) {
+        setToolNote(
+          `Herramienta${calls.length > 1 ? 's' : ''}: ${calls
+            .map((call) => `${call.tool ?? '?'}${call.ok === false ? ' (error)' : ''}`)
+            .join(', ')}`
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Request failed.');
       setPending(null);
@@ -306,6 +321,11 @@ export default function OfficeAgentChat({
 
       {error && (
         <p className="border-b border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-[11px] text-rose-300">{error}</p>
+      )}
+      {toolNote && (
+        <p className="border-b border-border/40 bg-background/20 px-4 py-1 text-[10px] text-muted-foreground">
+          🔧 {toolNote}
+        </p>
       )}
 
       {/* Messages */}

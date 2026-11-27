@@ -9,10 +9,14 @@
  * Mismo texto para Venice y para el bridge/OpenClaw: se pasa como `systemPrompt`.
  */
 import type { ResolvedAgentIdentity } from './agentPersonas';
+import type { AgentToolDef } from './toolCatalog';
+import { buildToolInstructions } from './toolProtocol';
 
 export type AgentPromptContext = {
   sessionId?: string;
   companyName?: string;
+  /** Tools de lectura disponibles (solo orquestador en S02a). */
+  tools?: AgentToolDef[];
 };
 
 function bullets(items: string[]): string {
@@ -49,6 +53,7 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Un pause/stop es una SOLICITUD; solo cuenta como confirmado cuando llega `agent.paused` / `agent.stopped`.',
     '- El origen de un dato (MOCK / REAL / sin origen) nunca se maquilla.',
     ...(sessionLines.length ? ['', 'Sesión actual:', bullets(sessionLines)] : []),
+    ...(context.tools && context.tools.length ? ['', buildToolInstructions(context.tools)] : []),
     '',
     'Cómo respondes:',
     `- Habla como ${identity.name}, en primera persona; no como un asistente genérico.`,
@@ -64,7 +69,7 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
 
 /** Sufijo solo en llamadas al modelo (no se guarda en el chat en Convex). */
 const AGENT_REPLY_IN_USER_LANGUAGE_TAIL =
-  '\n\n[System: respond in the same natural language as the user message above. Stay in character as this agent. Do not output JSON blocks unless the user explicitly asks for JSON.]';
+  '\n\n[System: respond in the same natural language as the user message above. Stay in character as this agent. Do not output JSON blocks unless the user explicitly asks for JSON or you are emitting a tool block exactly as instructed by the system prompt.]';
 
 export function augmentAgentMessageForModel(message: string): string {
   return message + AGENT_REPLY_IN_USER_LANGUAGE_TAIL;
