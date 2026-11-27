@@ -16,7 +16,7 @@
     "harness:worker:once": "node ./script/harness-worker.mjs --once",
     "harness:check": "node --test script/harness-activities-check.mjs",
     "swarmy:check": "node --test script/chain-logic-check.mjs script/status-badge-check.mjs script/swarmy-runs-check.mjs script/harness-activities-check.mjs",
-    "agents:check": "node --test script/agent-tool-protocol-check.mjs",
+    "agents:check": "node --test script/agent-tool-protocol-check.mjs script/agent-intent-check.mjs",
     "harness:python:setup": "python3.11 -m venv .harness-venv && .harness-venv/bin/pip install -r harness/original/marketing/requirements.txt"
   },
   "dependencies": {

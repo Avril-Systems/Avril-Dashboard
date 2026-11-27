@@ -22,6 +22,7 @@ import {
 import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import { AGENT_TOOLS, getAgentTool } from '@/src/modules/agents/toolCatalog';
+import { detectIntent } from '@/src/modules/agents/intent';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
 import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
 import {
@@ -666,6 +667,93 @@ export async function POST(req: Request) {
       messages: contextMessages.length > 0 ? contextMessages : undefined,
       maxContextChars: BRIDGE_CONTEXT_MAX_CHARS,
     };
+
+    /**
+     * S05: enrutado determinista por intención. Evita depender de que Venice emita el
+     * bloque de tool. Solo aplica al orquestador y con señales de alta confianza.
+     */
+    const detectedIntent =
+      mode === 'agent' && agentTools.length > 0 ? detectIntent(message) : ({ kind: 'none' } as const);
+
+    if (detectedIntent.kind === 'read') {
+      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
+      const outcome = await executeAgentTool(call, { sessionId: agentSessionId });
+
+      try {
+        const data = outcome.ok ? (outcome.data as any) : undefined;
+        await recordAgentToolCall({
+          chatId,
+          sessionId: agentSessionId,
+          agentKey: agentAuthorId ?? 'agent',
+          tool: outcome.tool,
+          args: call.args,
+          ok: outcome.ok,
+          error: outcome.ok ? undefined : outcome.error,
+          runId: typeof data?.runId === 'string' ? data.runId : undefined,
+          activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
+        });
+      } catch {
+        // La traza no debe romper la respuesta.
+      }
+
+      const reply = summarizeToolOutcome(outcome);
+      try {
+        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent' });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'Tool ejecutada pero falló al persistir la respuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode,
+        chatId,
+        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
+        reply,
+        toolCalls: [
+          {
+            tool: outcome.tool,
+            args: call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          },
+        ],
+        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
+      });
+    }
+
+    if (detectedIntent.kind === 'proposal' || detectedIntent.kind === 'control') {
+      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
+      const summary = describeToolProposal(call);
+      const reply = [
+        `Propongo ejecutar \`${call.tool}\`:`,
+        summary,
+        '',
+        'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
+      ].join('\n');
+
+      try {
+        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent' });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode,
+        chatId,
+        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
+        reply,
+        requiresConfirmation: true,
+        proposal: { tool: call.tool, arguments: call.args, summary },
+        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
+      });
+    }
 
     const wantsMock = body.model === 'mock';
     if (wantsMock && mode !== 'agent') {
