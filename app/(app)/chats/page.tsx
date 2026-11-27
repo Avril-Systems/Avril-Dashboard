@@ -39,7 +39,7 @@ type Msg = {
   createdAt: string;
 };
 
-type ModelChoice = 'codex' | 'opus' | 'venice';
+type ModelChoice = 'auto' | 'openai' | 'codex' | 'opus' | 'venice';
 
 type IgnitionDraftRow = {
   _id: string;
@@ -93,7 +93,7 @@ export default function ChatsPage() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const [model, setModel] = useState<ModelChoice>('venice');
+  const [model, setModel] = useState<ModelChoice>('auto');
   const [streamingText, setStreamingText] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [newChatArea, setNewChatArea] = useState<AgentArea>(DEFAULT_AGENT_AREA);
@@ -177,7 +177,15 @@ export default function ChatsPage() {
 
   useEffect(() => {
     const savedModel = localStorage.getItem('avril-dashboard:model') as ModelChoice | null;
-    if (savedModel === 'codex' || savedModel === 'opus' || savedModel === 'venice') setModel(savedModel);
+    if (
+      savedModel === 'auto' ||
+      savedModel === 'openai' ||
+      savedModel === 'codex' ||
+      savedModel === 'opus' ||
+      savedModel === 'venice'
+    ) {
+      setModel(savedModel);
+    }
   }, []);
 
   useEffect(() => {
@@ -589,6 +597,8 @@ export default function ChatsPage() {
               onChange={(e) => setModel(e.target.value as ModelChoice)}
               className="bg-black/20 border border-white/10 rounded-lg px-2 py-1 text-gray-200"
             >
+              <option value="auto">Auto</option>
+              <option value="openai">OpenAI-compatible</option>
               <option value="venice">Venice</option>
               <option value="codex">Codex</option>
               <option value="opus">Opus</option>

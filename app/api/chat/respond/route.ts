@@ -12,6 +12,12 @@ import {
 } from '@/src/lib/convexServer';
 import { formatBridgeFetchError, resolveOpenClawBridgeUrl } from '@/src/lib/openclawBridgeEnv';
 import {
+  callOpenAICompatible,
+  hasInferenceConfig,
+  inferenceTemperature,
+  readInferenceConfig,
+} from '@/src/lib/inference';
+import {
   augmentUserMessageForModel,
   buildAvrilUnifiedSystemPrompt,
 } from '@/src/modules/avril/buildAvrilSystemPrompt';
@@ -60,7 +66,7 @@ type RequestBody = {
   message: string;
   organizationId?: string;
   /** `mock` solo existe en modo agente y solo fuera de producción (pruebas de plumbing). */
-  model?: 'codex' | 'opus' | 'venice' | 'mock';
+  model?: 'auto' | 'openai' | 'codex' | 'opus' | 'venice' | 'mock';
   /** Confirmación explícita de una tool de escritura propuesta antes (S02b). */
   confirmTool?: { tool?: string; arguments?: Record<string, unknown> };
 };
@@ -81,6 +87,9 @@ type ApiErrorCode =
   | 'BRIDGE_ERROR'
   | 'VENICE_TIMEOUT'
   | 'VENICE_ERROR'
+  | 'INFERENCE_CONFIG_MISSING'
+  | 'INFERENCE_TIMEOUT'
+  | 'INFERENCE_ERROR'
   | 'INTERNAL_ERROR';
 
 type BridgeResult =
@@ -154,7 +163,7 @@ function buildMockAgentReply(
   ].join('\n');
 }
 
-function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+function buildChatMessages(input: BridgeInput): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const base = input.systemPrompt?.trim() || buildAvrilUnifiedSystemPrompt();
   const meta = [input.area && `Primary area: ${input.area}.`, input.subArea && `Sub-area: ${input.subArea}.`]
     .filter(Boolean)
@@ -212,7 +221,7 @@ async function callVeniceInference(input: BridgeInput): Promise<VeniceResult> {
         },
         body: JSON.stringify({
           model: veniceModel,
-          messages: buildVeniceMessages(input),
+          messages: buildChatMessages(input),
           temperature: 0.45,
         }),
         cache: 'no-store',
@@ -392,6 +401,28 @@ async function callOpenClawBridge(input: BridgeInput): Promise<BridgeResult> {
       retryable: true,
     }
   );
+}
+
+type ProviderKind = 'openai' | 'venice' | 'bridge' | 'mock';
+
+function hasVeniceConfig(): boolean {
+  return Boolean(
+    (process.env.VENICE_INFERENCE_KEY ?? '').trim() || (process.env.VENICE_ADMIN_KEY ?? '').trim()
+  );
+}
+
+/**
+ * Prioridad: elección explícita del caller; en `auto` (o sin `model`) se usa el
+ * proveedor genérico OpenAI-compatible si está configurado; luego Venice; luego bridge.
+ */
+function resolveProvider(requested: RequestBody['model']): ProviderKind {
+  if (requested === 'mock') return 'mock';
+  if (requested === 'venice') return 'venice';
+  if (requested === 'codex' || requested === 'opus') return 'bridge';
+  if (requested === 'openai') return 'openai';
+  if (hasInferenceConfig()) return 'openai';
+  if (hasVeniceConfig()) return 'venice';
+  return 'bridge';
 }
 
 export async function POST(req: Request) {
@@ -665,7 +696,6 @@ export async function POST(req: Request) {
       chatId,
       message,
       mode,
-      model: body.model === 'mock' ? undefined : body.model,
       agentId,
       area,
       subArea,
@@ -773,7 +803,8 @@ export async function POST(req: Request) {
       });
     }
 
-    const wantsMock = body.model === 'mock';
+    const provider = resolveProvider(body.model);
+    const wantsMock = provider === 'mock';
     if (wantsMock && mode !== 'agent') {
       return errorResponse(400, 'BAD_REQUEST', 'El modelo mock solo existe en modo agente.');
     }
@@ -782,15 +813,33 @@ export async function POST(req: Request) {
     }
 
     const callModel = async (modelInput: BridgeInput) => {
-      if (wantsMock) {
+      if (provider === 'mock') {
         return {
           ok: true as const,
           text: buildMockAgentReply(agentIdentity, modelInput.message, contextMessages.length),
         };
       }
-      return modelInput.model === 'venice'
-        ? await callVeniceInference(modelInput)
-        : await callOpenClawBridge(modelInput);
+      if (provider === 'openai') {
+        const config = readInferenceConfig();
+        if (!config.ok) {
+          return {
+            ok: false as const,
+            code: 'INFERENCE_CONFIG_MISSING' as const,
+            message: `Falta configuración de inferencia: ${config.missing.join(', ')}.`,
+            retryable: false,
+          };
+        }
+        return await callOpenAICompatible({
+          config: config.config,
+          messages: buildChatMessages(modelInput),
+          temperature: inferenceTemperature(),
+        });
+      }
+      if (provider === 'venice') return await callVeniceInference(modelInput);
+      return await callOpenClawBridge({
+        ...modelInput,
+        model: body.model === 'opus' ? 'opus' : 'codex',
+      });
     };
 
     const result = await callModel(input);
@@ -1004,6 +1053,7 @@ export async function POST(req: Request) {
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(pendingProposal ? { requiresConfirmation: true, proposal: pendingProposal } : {}),
       ...(turnMeta ? { meta: turnMeta } : {}),
+      provider,
       reply: displayText,
       ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),

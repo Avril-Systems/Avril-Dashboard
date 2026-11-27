@@ -95,7 +95,7 @@ type LocalMessage = {
 };
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? "";
-type ModelChoice = "codex" | "opus" | "venice";
+type ModelChoice = "auto" | "openai" | "codex" | "opus" | "venice";
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ className, containerClassName, showRing = true, ...props }, ref) => {
@@ -271,7 +271,7 @@ export function AnimatedAIChat({
   const [status, setStatus] = useState("");
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
-  const [model, setModel] = useState<ModelChoice>("venice");
+  const [model, setModel] = useState<ModelChoice>("auto");
   /** Index of folder paper (0–2) while Venice generates a profile prompt */
   const [folderPaperBusy, setFolderPaperBusy] = useState<number | null>(null);
   /** Wizard stepper generating state */
@@ -292,11 +292,17 @@ export function AnimatedAIChat({
 
   useEffect(() => {
     if (hideFolder) {
-      setModel("venice");
+      setModel("auto");
       return;
     }
     const savedModel = localStorage.getItem("avril-dashboard:model-home") as ModelChoice | null;
-    if (savedModel === "codex" || savedModel === "opus" || savedModel === "venice") {
+    if (
+      savedModel === "auto" ||
+      savedModel === "openai" ||
+      savedModel === "codex" ||
+      savedModel === "opus" ||
+      savedModel === "venice"
+    ) {
       setModel(savedModel);
     }
   }, [hideFolder]);
@@ -1089,6 +1095,8 @@ export function AnimatedAIChat({
                         className="h-9 rounded-md border border-white/10 bg-black/40 px-2 text-xs text-white/90 outline-none focus:ring-1 focus:ring-violet-400/50"
                         aria-label="Choose AI model"
                       >
+                        <option value="auto">Auto</option>
+                        <option value="openai">OpenAI-compatible</option>
                         <option value="venice">Venice</option>
                         <option value="codex">OpenClaw (Codex)</option>
                         <option value="opus">OpenClaw (Opus)</option>

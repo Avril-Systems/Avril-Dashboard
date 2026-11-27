@@ -59,7 +59,7 @@ type ServerToolCall = {
   createdAt: string;
 };
 
-type ModelChoice = 'venice' | 'codex' | 'opus' | 'mock';
+type ModelChoice = 'auto' | 'openai' | 'venice' | 'codex' | 'opus' | 'mock';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
 const POLL_MS = 4000;
@@ -82,7 +82,7 @@ export default function OfficeAgentChat({
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [model, setModel] = useState<ModelChoice>('venice');
+  const [model, setModel] = useState<ModelChoice>('auto');
   const [pending, setPending] = useState<PendingMessage | null>(null);
   /** Propuesta de acción real pendiente de confirmación (S02b). */
   const [proposal, setProposal] = useState<ToolProposal | null>(null);
@@ -108,7 +108,16 @@ export default function OfficeAgentChat({
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(MODEL_STORAGE_KEY);
-      if (saved === 'venice' || saved === 'codex' || saved === 'opus' || saved === 'mock') setModel(saved);
+      if (
+        saved === 'auto' ||
+        saved === 'openai' ||
+        saved === 'venice' ||
+        saved === 'codex' ||
+        saved === 'opus' ||
+        saved === 'mock'
+      ) {
+        setModel(saved);
+      }
     } catch {
       // ignore
     }
@@ -386,9 +395,11 @@ export default function OfficeAgentChat({
         <select
           value={model}
           onChange={(e) => setModel(e.target.value as ModelChoice)}
-          title="Modelo para este agente (Venice no necesita bridge)"
+          title="Auto usa el proveedor genérico OpenAI-compatible si está configurado"
           className="flex-shrink-0 rounded-md border border-border/60 bg-background/40 px-1.5 py-1 text-[11px] text-foreground"
         >
+          <option value="auto">Auto</option>
+          <option value="openai">OpenAI-compatible</option>
           <option value="venice">Venice</option>
           <option value="codex">Codex (bridge)</option>
           <option value="opus">Opus (bridge)</option>
