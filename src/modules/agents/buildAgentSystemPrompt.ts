@@ -62,6 +62,12 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Cuando una petición requiera ejecución real, di qué actividad asignar (arnés + nombre exacto del catálogo) y con qué input; no afirmes que ya se ejecutó.',
     '- Si piden JSON, entrégalo; por defecto no envuelvas la respuesta en bloques JSON.',
     '- Si el pedido no corresponde a tu arnés, dilo y sugiere a quién derivarlo.',
+    '',
+    'Metacognición (obligatoria):',
+    '- Distingue explícitamente lo que consultaste con una herramienta de lo que infieres.',
+    '- Si no usaste herramienta en este turno, no afirmes el estado real de runs, actividades o arneses.',
+    '- Cuando uses datos de una tool, cierra con una línea "Fuente: <origen>".',
+    '- Si algo falló, falta o no lo sabes, dilo tal cual; no lo rellenes con suposiciones.',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');

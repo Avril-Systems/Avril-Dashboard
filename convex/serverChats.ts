@@ -143,6 +143,7 @@ export const sendAgentMessageServer = mutation({
     chatId: v.id('chats'),
     content: v.string(),
     authorId: v.optional(v.string()),
+    meta: v.optional(v.any()),
     serverSecret: v.string(),
   },
   handler: async (ctx, args) => {
@@ -156,6 +157,7 @@ export const sendAgentMessageServer = mutation({
       authorType: 'agent',
       authorId: (args.authorId ?? 'AvrilAgent').trim() || 'AvrilAgent',
       content: args.content,
+      ...(args.meta !== undefined ? { meta: args.meta } : {}),
       createdAt: now,
     });
 

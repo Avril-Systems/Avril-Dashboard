@@ -28,11 +28,20 @@ type AgentOption = {
   status: string;
 };
 
+type TurnMetaLite = {
+  confidence: 'high' | 'medium' | 'low';
+  sources: string[];
+  tools: Array<{ tool: string; ok: boolean; error?: string }>;
+  unknowns: string[];
+  generatedAt: string;
+};
+
 type ServerMessage = {
   _id: string;
   authorType: 'human' | 'agent' | string;
   authorId: string;
   content: string;
+  meta?: TurnMetaLite | null;
   createdAt: string;
 };
 
@@ -455,6 +464,25 @@ export default function OfficeAgentChat({
                     {msg.content}
                   </ReactMarkdown>
                 </div>
+                {!isHuman && msg.meta && (
+                  <details className="mt-1 border-t border-border/40 pt-1 text-[10px] text-muted-foreground">
+                    <summary className="cursor-pointer select-none">
+                      Cómo lo sé · {msg.meta.confidence}
+                    </summary>
+                    <ul className="mt-1 space-y-0.5">
+                      {msg.meta.sources.length > 0 && <li>Fuentes: {msg.meta.sources.join(' · ')}</li>}
+                      {msg.meta.tools.length > 0 && (
+                        <li>
+                          Herramientas:{' '}
+                          {msg.meta.tools.map((tool) => `${tool.tool}${tool.ok ? '' : ' (error)'}`).join(', ')}
+                        </li>
+                      )}
+                      {msg.meta.unknowns.map((unknown) => (
+                        <li key={unknown}>Límite: {unknown}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             </div>
           );

@@ -123,6 +123,8 @@ export async function sendAgentMessage(args: {
   chatId: string;
   content: string;
   authorId?: string;
+  /** Metacognición del turno (S06): fuentes, confianza, límites. */
+  meta?: unknown;
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
@@ -131,6 +133,7 @@ export async function sendAgentMessage(args: {
     chatId: args.chatId,
     content: args.content,
     authorId: args.authorId ?? 'AvrilAgent',
+    ...(args.meta !== undefined ? { meta: args.meta } : {}),
     serverSecret,
   });
 }

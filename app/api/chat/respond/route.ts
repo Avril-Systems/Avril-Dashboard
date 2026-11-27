@@ -23,6 +23,7 @@ import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import { AGENT_TOOLS, getAgentTool } from '@/src/modules/agents/toolCatalog';
 import { detectIntent } from '@/src/modules/agents/intent';
+import { buildTurnMeta } from '@/src/modules/agents/turnMeta';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
 import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
 import {
@@ -464,6 +465,10 @@ export async function POST(req: Request) {
       const call: ToolCall = { tool: def.name, args: (rawArgs ?? {}) as Record<string, unknown> };
       const outcome = await executeConfirmedAgentTool(call);
       const reply = summarizeConfirmedToolOutcome(outcome);
+      const meta = buildTurnMeta({
+        tools: [{ tool: call.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
+        executed: outcome.ok,
+      });
 
       try {
         const data = outcome.ok ? (outcome.data as any) : undefined;
@@ -492,6 +497,7 @@ export async function POST(req: Request) {
           chatId: resolvedConfirm.chatId,
           content: reply,
           authorId: resolvedConfirm.agent.agentKey,
+          meta,
         });
       } catch (err) {
         warning = `La acción se procesó, pero no se pudo persistir el mensaje: ${
@@ -513,6 +519,7 @@ export async function POST(req: Request) {
             ...(outcome.ok ? {} : { error: outcome.error }),
           },
         ],
+        meta,
         ...(warning ? { warning } : {}),
       });
     }
@@ -697,8 +704,12 @@ export async function POST(req: Request) {
       }
 
       const reply = summarizeToolOutcome(outcome);
+      const meta = buildTurnMeta({
+        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
+        tools: [{ tool: outcome.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
+      });
       try {
-        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent' });
+        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
       } catch (err) {
         return errorResponse(502, 'CONVEX_ERROR', 'Tool ejecutada pero falló al persistir la respuesta.', {
           retryable: true,
@@ -721,6 +732,7 @@ export async function POST(req: Request) {
           },
         ],
         intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
+        meta,
       });
     }
 
@@ -733,9 +745,14 @@ export async function POST(req: Request) {
         '',
         'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
       ].join('\n');
+      const meta = buildTurnMeta({
+        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
+        tools: [],
+        proposal: true,
+      });
 
       try {
-        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent' });
+        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
       } catch (err) {
         return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
           retryable: true,
@@ -752,6 +769,7 @@ export async function POST(req: Request) {
         requiresConfirmation: true,
         proposal: { tool: call.tool, arguments: call.args, summary },
         intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
+        meta,
       });
     }
 
@@ -850,6 +868,19 @@ export async function POST(req: Request) {
       }
     }
 
+    const turnMeta =
+      mode === 'agent'
+        ? buildTurnMeta({
+            tools: toolCalls.map((call) => ({
+              tool: call.tool,
+              ok: call.ok,
+              ...(call.error ? { error: call.error } : {}),
+            })),
+            proposal: pendingProposal !== null,
+            mock: wantsMock,
+          })
+        : null;
+
     const parsed =
       mode === 'agent'
         ? { displayText: agentFinalText, architectPayload: null as Record<string, unknown> | null }
@@ -858,7 +889,12 @@ export async function POST(req: Request) {
     const architectPayload = parsed.architectPayload;
 
     try {
-      await sendAgentMessage({ chatId, content: displayText, authorId: agentAuthorId ?? 'AvrilAgent' });
+      await sendAgentMessage({
+        chatId,
+        content: displayText,
+        authorId: agentAuthorId ?? 'AvrilAgent',
+        ...(turnMeta ? { meta: turnMeta } : {}),
+      });
     } catch (err) {
       return errorResponse(502, 'CONVEX_ERROR', 'Agent reply received but failed to persist.', {
         retryable: true,
@@ -967,6 +1003,7 @@ export async function POST(req: Request) {
       ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(pendingProposal ? { requiresConfirmation: true, proposal: pendingProposal } : {}),
+      ...(turnMeta ? { meta: turnMeta } : {}),
       reply: displayText,
       ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),

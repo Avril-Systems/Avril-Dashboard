@@ -238,7 +238,15 @@ export default defineSchema({
     .index('by_updatedAt', ['updatedAt'])
     .index('by_agent', ['agentId'])
     .index('by_session_agent', ['orchestrationSessionId', 'agentKey']),
-  messages: defineTable({ chatId: v.id('chats'), authorType: v.union(v.literal('human'), v.literal('agent')), authorId: v.string(), content: v.string(), createdAt: v.string() }).index('by_chat', ['chatId']),
+  messages: defineTable({
+    chatId: v.id('chats'),
+    authorType: v.union(v.literal('human'), v.literal('agent')),
+    authorId: v.string(),
+    content: v.string(),
+    /** Metacognición del turno (S06): fuentes, confianza, límites. Solo en respuestas de agente. */
+    meta: v.optional(v.any()),
+    createdAt: v.string(),
+  }).index('by_chat', ['chatId']),
   /** Latest Avril chat → ignition export for this thread (full demo path). */
   chatIgnitionDrafts: defineTable({
     organizationId: v.id('organizations'),
