@@ -8,6 +8,7 @@
  *
  * Mismo texto para Venice y para el bridge/OpenClaw: se pasa como `systemPrompt`.
  */
+import { HARNESS_CATALOG, isHarnessType } from '@/convex/lib/harnessActivities';
 import type { ResolvedAgentIdentity } from './agentPersonas';
 import type { AgentToolDef } from './toolCatalog';
 import { buildToolInstructions } from './toolProtocol';
@@ -43,6 +44,26 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '',
     'Capacidades reales (lo que tu arnés sabe hacer hoy):',
     persona.capabilities.length ? bullets(persona.capabilities) : '- Ninguna registrada.',
+    ...(persona.harnessType && isHarnessType(persona.harnessType)
+      ? [
+          '',
+          'Actividades asignables (usa la clave exacta en assign_activity):',
+          HARNESS_CATALOG[persona.harnessType].activities
+            .map((activity) => {
+              const fields = activity.inputFields
+                .map((field) => {
+                  const bits = [field.type, field.required ? 'obligatorio' : 'opcional'];
+                  if (field.defaultValue !== undefined) bits.push(`default ${JSON.stringify(field.defaultValue)}`);
+                  return `${field.key} (${bits.join(', ')})`;
+                })
+                .join('; ');
+              return `- ${activity.key} — ${activity.label}: ${activity.description}${
+                fields ? ` Input: ${fields}.` : ' Sin input (usa {}).'
+              }`;
+            })
+            .join('\n'),
+        ]
+      : []),
     '',
     'Límites:',
     bullets(persona.boundaries),
@@ -53,7 +74,9 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Un pause/stop es una SOLICITUD; solo cuenta como confirmado cuando llega `agent.paused` / `agent.stopped`.',
     '- El origen de un dato (MOCK / REAL / sin origen) nunca se maquilla.',
     ...(sessionLines.length ? ['', 'Sesión actual:', bullets(sessionLines)] : []),
-    ...(context.tools && context.tools.length ? ['', buildToolInstructions(context.tools)] : []),
+    ...(context.tools && context.tools.length
+      ? ['', buildToolInstructions(context.tools, { harnessType: persona.harnessType })]
+      : []),
     '',
     'Cómo respondes:',
     `- Habla como ${identity.name}, en primera persona; no como un asistente genérico.`,

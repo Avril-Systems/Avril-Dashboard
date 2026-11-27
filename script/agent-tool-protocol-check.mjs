@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENT_TOOLS, isWriteTool } from '../src/modules/agents/toolCatalog.ts';
+import {
+  AGENT_TOOLS,
+  isToolAllowedForAgent,
+  isWriteTool,
+  toolsForAgent,
+} from '../src/modules/agents/toolCatalog.ts';
 import { buildToolInstructions, describeToolProposal, parseToolCall, stripToolBlocks } from '../src/modules/agents/toolProtocol.ts';
 
 test('parseToolCall acepta un bloque válido', () => {
@@ -98,4 +103,35 @@ test('buildToolInstructions separa lectura y escritura', () => {
   assert.match(prompt, /LECTURA/);
   assert.match(prompt, /ESCRITURA/);
   assert.match(prompt, /confirmación/i);
+});
+
+test('toolsForAgent: orquestador ve todas; arnés solo list/assign', () => {
+  const orchestrator = toolsForAgent(null).map((t) => t.name).sort();
+  const support = toolsForAgent('support').map((t) => t.name).sort();
+  assert.deepEqual(orchestrator, AGENT_TOOLS.map((t) => t.name).sort());
+  assert.deepEqual(support, ['assign_activity', 'list_activities']);
+});
+
+test('isToolAllowedForAgent bloquea tools de orquestador en un arnés', () => {
+  assert.equal(isToolAllowedForAgent('run_overview', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('request_control', 'marketing'), false);
+  assert.equal(isToolAllowedForAgent('list_activities', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('assign_activity', 'marketing'), true);
+  assert.equal(isToolAllowedForAgent('run_overview', null), true);
+});
+
+test('buildToolInstructions oculta harnessType y declara el alcance', () => {
+  const prompt = buildToolInstructions(toolsForAgent('support'), { harnessType: 'support' });
+  assert.match(prompt, /Alcance: solo tu arnés/);
+  assert.doesNotMatch(prompt, /harnessType:/);
+});
+
+test('describeToolProposal usa el arnés inyectado en la propuesta', () => {
+  const summary = describeToolProposal({
+    tool: 'assign_activity',
+    args: { harnessType: 'prospecting', activity: 'github_discovery', input: { queries: 'topic:mcp', maxCandidates: 5 } },
+  });
+  assert.match(summary, /prospecting/);
+  assert.match(summary, /github_discovery/);
+  assert.match(summary, /maxCandidates/);
 });

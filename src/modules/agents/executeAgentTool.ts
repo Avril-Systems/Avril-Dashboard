@@ -89,16 +89,20 @@ async function runOverview(runId: string) {
   };
 }
 
-async function listActivities(args: Record<string, unknown>) {
+async function listActivities(args: Record<string, unknown>, scopeHarness: string | null = null) {
   const runId = asString(args.runId);
-  if (args.runId !== undefined && !isSafeId(runId)) {
+  if (runId !== undefined && !isSafeId(runId)) {
     throw new Error('runId inválido.');
   }
 
-  const harnessType = asString(args.harnessType);
-  if (harnessType !== undefined && !isHarnessType(harnessType)) {
+  const requestedHarness = asString(args.harnessType);
+  if (requestedHarness !== undefined && !isHarnessType(requestedHarness)) {
     throw new Error('harnessType inválido (support | b2b | prospecting | marketing).');
   }
+  if (scopeHarness && requestedHarness && requestedHarness !== scopeHarness) {
+    throw new Error('Solo puedes consultar actividades de tu propio arnés.');
+  }
+  const harnessType = scopeHarness ?? requestedHarness;
 
   const statusRaw = asString(args.status);
   if (statusRaw !== undefined && !ACTIVITY_STATUSES.includes(statusRaw as ActivityStatus)) {
@@ -167,7 +171,7 @@ async function listAgents(sessionId: string) {
 /** Ejecuta una tool de LECTURA ya validada por `parseToolCall`. Las de escritura se rechazan. */
 export async function executeAgentTool(
   call: ToolCall,
-  context: { sessionId: string }
+  context: { sessionId: string; harnessType?: string | null }
 ): Promise<AgentToolOutcome> {
   const def = getAgentTool(call.tool);
   if (!def) {
@@ -189,7 +193,11 @@ export async function executeAgentTool(
         return { tool: call.tool, ok: true, data: await runOverview(runId) };
       }
       case 'list_activities':
-        return { tool: call.tool, ok: true, data: await listActivities(call.args) };
+        return {
+          tool: call.tool,
+          ok: true,
+          data: await listActivities(call.args, context.harnessType ?? null),
+        };
       case 'harness_health':
         return { tool: call.tool, ok: true, data: await harnessHealth() };
       case 'list_agents': {
@@ -284,7 +292,10 @@ export function summarizeToolOutcome(outcome: AgentToolOutcome): string {
  * Ejecuta una tool de ESCRITURA ya confirmada por el operador (`confirmTool`).
  * El servidor revalida arnés/actividad/args: la confirmación de UI no exime de validar.
  */
-export async function executeConfirmedAgentTool(call: ToolCall): Promise<AgentToolOutcome> {
+export async function executeConfirmedAgentTool(
+  call: ToolCall,
+  context: { harnessType?: string | null } = {}
+): Promise<AgentToolOutcome> {
   const def = getAgentTool(call.tool);
   if (!def) {
     return { tool: String(call.tool), ok: false, error: `Herramienta desconocida: ${String(call.tool)}.` };
@@ -296,7 +307,15 @@ export async function executeConfirmedAgentTool(call: ToolCall): Promise<AgentTo
   try {
     switch (call.tool) {
       case 'assign_activity': {
-        const harnessType = asString(call.args.harnessType, 40);
+        const requestedHarness = asString(call.args.harnessType, 40);
+        if (context.harnessType) {
+          if (requestedHarness && requestedHarness !== context.harnessType) {
+            throw new Error('Solo puedes asignar actividades de tu propio arnés.');
+          }
+        } else if (!requestedHarness) {
+          throw new Error('Falta harnessType para asignar la actividad.');
+        }
+        const harnessType = context.harnessType ?? requestedHarness;
         const activity = asString(call.args.activity, 80);
         const title = asString(call.args.title, 120);
         const normalized = normalizeActivityInput(harnessType, activity, call.args.input ?? {});

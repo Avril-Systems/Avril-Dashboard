@@ -74,7 +74,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     description:
       'Propone encolar una actividad real de un arnés (crea run + actividad queued; la ejecuta el worker). Requiere confirmación del operador.',
     args: [
-      { name: 'harnessType', type: 'string', required: true, description: 'support | b2b | prospecting | marketing.' },
+      { name: 'harnessType', type: 'string', description: 'Orquestador: arnés destino (obligatorio). Agente de arnés: se ignora; el servidor usa el suyo.' },
       {
         name: 'activity',
         type: 'string',
@@ -105,4 +105,16 @@ export function getAgentTool(name: string): AgentToolDef | null {
 
 export function isWriteTool(name: string): boolean {
   return getAgentTool(name)?.kind === 'write';
+}
+
+/** Tools disponibles para un agente. El orquestador ve todas; un arnés solo las suyas. */
+const HARNESS_TOOL_NAMES: AgentToolName[] = ['list_activities', 'assign_activity'];
+
+export function toolsForAgent(harnessType: string | null): AgentToolDef[] {
+  if (!harnessType) return AGENT_TOOLS;
+  return AGENT_TOOLS.filter((tool) => HARNESS_TOOL_NAMES.includes(tool.name));
+}
+
+export function isToolAllowedForAgent(name: string, harnessType: string | null): boolean {
+  return toolsForAgent(harnessType).some((tool) => tool.name === name);
 }

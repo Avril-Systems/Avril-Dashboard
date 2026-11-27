@@ -74,9 +74,10 @@ export function stripToolBlocks(rawText: string): string {
     .trim();
 }
 
-function renderArgs(def: AgentToolDef): string {
-  if (!def.args.length) return 'sin argumentos';
-  return def.args
+function renderArgs(def: AgentToolDef, harnessType?: string | null): string {
+  const args = harnessType ? def.args.filter((arg) => arg.name !== 'harnessType') : def.args;
+  if (!args.length) return 'sin argumentos';
+  return args
     .map((arg) => `${arg.name}: ${arg.type}${arg.required ? ', obligatorio' : ', opcional'} — ${arg.description}`)
     .join('; ');
 }
@@ -106,7 +107,10 @@ export function describeToolProposal(call: ToolCall): string {
 }
 
 /** Sección del system prompt con las tools disponibles y el formato exacto. */
-export function buildToolInstructions(tools: AgentToolDef[]): string {
+export function buildToolInstructions(
+  tools: AgentToolDef[],
+  options: { harnessType?: string | null } = {}
+): string {
   if (!tools.length) return '';
 
   const readTools = tools.filter((tool) => tool.kind === 'read');
@@ -122,11 +126,18 @@ export function buildToolInstructions(tools: AgentToolDef[]): string {
     'Herramientas disponibles (datos y acciones reales; no inventes resultados):',
   ];
 
+  if (options.harnessType) {
+    sections.push(
+      '',
+      `Alcance: solo tu arnés \`${options.harnessType}\`. No puedes consultar ni asignar actividades de otros arneses.`
+    );
+  }
+
   if (readTools.length) {
     sections.push(
       '',
       'LECTURA (se ejecutan en tu turno):',
-      readTools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n')
+      readTools.map((tool) => `- ${tool.name}(${renderArgs(tool, options.harnessType)}) — ${tool.description}`).join('\n')
     );
   }
 
@@ -134,7 +145,7 @@ export function buildToolInstructions(tools: AgentToolDef[]): string {
     sections.push(
       '',
       'ESCRITURA (requieren confirmación explícita del operador; el servidor NO las ejecuta en tu turno):',
-      writeTools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n')
+      writeTools.map((tool) => `- ${tool.name}(${renderArgs(tool, options.harnessType)}) — ${tool.description}`).join('\n')
     );
   }
 
@@ -146,6 +157,7 @@ export function buildToolInstructions(tools: AgentToolDef[]): string {
     example,
     '- Usa exactamente los nombres y argumentos listados. El servidor valida el bloque; si falta un argumento, no se ejecuta.',
     '- Las de LECTURA se ejecutan y te devuelven el dato real; después responderás al usuario en lenguaje natural.',
+    '- Si el usuario pide ejecutar, preparar o encolar una actividad, usa `assign_activity`. Usa `list_activities` solo para consultar estado.',
     '- Las de ESCRITURA NO se ejecutan: el servidor devuelve una propuesta y el operador la confirma en la UI. Nunca digas que ya se ejecutó.',
     '- Nunca inventes cifras, estados, runIds ni resultados. Si la herramienta falla, dilo tal cual.',
     '- Para acciones destructivas (kill/stop) o que crean runs, explica qué hará la propuesta y deja que el operador confirme.'

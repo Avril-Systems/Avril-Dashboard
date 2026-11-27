@@ -421,6 +421,7 @@ export default defineSchema({
     .index("by_tenant_activity", ["tenantId", "activityId"])
     .index("by_tenant_status", ["tenantId", "status"])
     .index("by_tenant_harness_status", ["tenantId", "harnessType", "status"])
+    .index("by_tenant_harness_createdAt", ["tenantId", "harnessType", "createdAt"])
     .index("by_tenant_run", ["tenantId", "runId"])
     .index("by_tenant_createdAt", ["tenantId", "createdAt"]),
 });

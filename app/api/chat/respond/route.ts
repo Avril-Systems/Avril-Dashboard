@@ -5,6 +5,7 @@ import {
   claimAgentToolProposal,
   createAgentToolProposal,
   finishAgentToolProposal,
+  getAgentChat,
   getDefaultOrganizationId,
   getOrCreateAgentChat,
   listChats,
@@ -31,7 +32,12 @@ import {
 } from '@/src/modules/agents/buildAgentSystemPrompt';
 import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
-import { AGENT_TOOLS, getAgentTool } from '@/src/modules/agents/toolCatalog';
+import {
+  getAgentTool,
+  isToolAllowedForAgent,
+  toolsForAgent,
+} from '@/src/modules/agents/toolCatalog';
+import { isActivityForHarness } from '@/convex/lib/harnessActivities';
 import { detectIntent } from '@/src/modules/agents/intent';
 import { buildTurnMeta } from '@/src/modules/agents/turnMeta';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
@@ -562,8 +568,48 @@ export async function POST(req: Request) {
         return errorResponse(400, 'BAD_REQUEST', 'La propuesta no corresponde a una herramienta de escritura.');
       }
 
+      let confirmHarness: string | null = null;
+      try {
+        const agentChat = await getAgentChat({
+          sessionId: claim.proposal.sessionId,
+          agentKey: claim.proposal.agentKey,
+        });
+        if (!agentChat) {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'El agente de la propuesta ya no existe.',
+          });
+          return errorResponse(404, 'AGENT_NOT_FOUND', 'El agente de la propuesta ya no existe.');
+        }
+        confirmHarness = resolveAgentIdentity({
+          agentKey: agentChat.agent.agentKey,
+          name: agentChat.agent.name,
+          role: agentChat.agent.role,
+          meta: agentChat.agent.meta,
+        }).persona.harnessType;
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo verificar el agente de la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      if (!isToolAllowedForAgent(def.name, confirmHarness)) {
+        try {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'Herramienta no disponible para este arnés.',
+          });
+        } catch {
+          // el claim ya evitó duplicados
+        }
+        return errorResponse(400, 'BAD_REQUEST', 'La propuesta usa una herramienta no disponible para este arnés.');
+      }
+
       const call: ToolCall = { tool: def.name, args: claim.proposal.args };
-      const outcome = await executeConfirmedAgentTool(call);
+      const outcome = await executeConfirmedAgentTool(call, { harnessType: confirmHarness });
 
       try {
         await finishAgentToolProposal({
@@ -699,8 +745,8 @@ export async function POST(req: Request) {
         role: resolved.agent.role,
         meta: resolved.agent.meta,
       });
-      // S02a: las tools de lectura son capacidad del orquestador (agente sin arnés).
-      agentTools = identity.persona.harnessType === null ? AGENT_TOOLS : [];
+      // Punto 3: el orquestador ve todas las tools; cada arnés solo las suyas.
+      agentTools = toolsForAgent(identity.persona.harnessType);
       systemPrompt = buildAgentSystemPrompt(identity, { sessionId, tools: agentTools });
       agentIdentity = identity;
     } else {
@@ -793,11 +839,16 @@ export async function POST(req: Request) {
      * bloque de tool. Solo aplica al orquestador y con señales de alta confianza.
      */
     const detectedIntent =
-      mode === 'agent' && agentTools.length > 0 ? detectIntent(message) : ({ kind: 'none' } as const);
+      mode === 'agent' && agentTools.length > 0 && agentIdentity?.persona.harnessType === null
+        ? detectIntent(message)
+        : ({ kind: 'none' } as const);
 
     if (detectedIntent.kind === 'read') {
       const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
-      const outcome = await executeAgentTool(call, { sessionId: agentSessionId });
+      const outcome = await executeAgentTool(call, {
+        sessionId: agentSessionId,
+        harnessType: agentIdentity?.persona.harnessType ?? null,
+      });
 
       try {
         const data = outcome.ok ? (outcome.data as any) : undefined;
@@ -976,17 +1027,42 @@ export async function POST(req: Request) {
 
       if (parsedCall.kind === 'call') {
         const callDef = getAgentTool(parsedCall.call.tool);
+        const harnessScope = agentIdentity?.persona.harnessType ?? null;
 
-        if (callDef?.kind === 'write') {
+        if (!callDef || !isToolAllowedForAgent(callDef.name, harnessScope)) {
+          agentFinalText = 'Esa herramienta no está disponible para este agente.';
+        } else if (callDef.kind === 'write') {
+          const requestedHarness =
+            typeof parsedCall.call.args.harnessType === 'string'
+              ? parsedCall.call.args.harnessType.trim()
+              : '';
+          const requestedActivity =
+            typeof parsedCall.call.args.activity === 'string'
+              ? parsedCall.call.args.activity.trim()
+              : '';
+          const wrongHarness = Boolean(harnessScope && requestedHarness && requestedHarness !== harnessScope);
+          const wrongActivity = Boolean(
+            harnessScope && requestedActivity && !isActivityForHarness(harnessScope, requestedActivity)
+          );
+
+          if (wrongHarness || wrongActivity) {
+            agentFinalText = wrongHarness
+              ? `Solo puedes asignar actividades del arnés \`${harnessScope}\`.`
+              : `La actividad \`${requestedActivity}\` no pertenece al arnés \`${harnessScope}\`.`;
+          } else {
           // S02b: nunca se ejecuta aquí. Se devuelve una propuesta y el operador confirma en la UI.
-          const summary = describeToolProposal(parsedCall.call);
+          // En un agente de arnés, el servidor fija su arnés en la propuesta (auditoría/summary).
+          const proposalArgs = harnessScope
+            ? { ...parsedCall.call.args, harnessType: harnessScope }
+            : parsedCall.call.args;
+          const summary = describeToolProposal({ tool: parsedCall.call.tool, args: proposalArgs });
           let createdProposal: { proposalId: string; expiresAt: number };
           try {
             createdProposal = await createAgentToolProposal({
               chatId,
               agentKey: agentAuthorId ?? '',
               tool: parsedCall.call.tool,
-              args: parsedCall.call.args,
+              args: proposalArgs,
               summary,
             });
           } catch (err) {
@@ -1000,7 +1076,7 @@ export async function POST(req: Request) {
             id: createdProposal.proposalId,
             expiresAt: createdProposal.expiresAt,
             tool: parsedCall.call.tool,
-            arguments: parsedCall.call.args,
+            arguments: proposalArgs,
             summary,
           };
           agentFinalText = [
@@ -1009,8 +1085,12 @@ export async function POST(req: Request) {
             '',
             'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
           ].join('\n');
+          }
         } else {
-          const outcome = await executeAgentTool(parsedCall.call, { sessionId: agentSessionId });
+          const outcome = await executeAgentTool(parsedCall.call, {
+            sessionId: agentSessionId,
+            harnessType: harnessScope,
+          });
           toolCalls.push({
             tool: outcome.tool,
             args: parsedCall.call.args,

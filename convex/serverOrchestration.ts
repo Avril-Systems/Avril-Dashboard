@@ -948,6 +948,8 @@ export const listHarnessActivities = query({
     requireSafeId(args.tenantId, "tenantId");
     const take = Math.max(1, Math.min(args.limit ?? 50, 200));
 
+    if (args.harnessType) requireSafeId(args.harnessType, "harnessType");
+
     let rows;
     if (args.runId) {
       requireSafeId(args.runId, "runId");
@@ -955,6 +957,25 @@ export const listHarnessActivities = query({
         .query("harnessActivities")
         .withIndex("by_tenant_run", (q) => q.eq("tenantId", args.tenantId).eq("runId", args.runId as string))
         .collect();
+    } else if (args.harnessType && args.status) {
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_harness_status", (q) =>
+          q
+            .eq("tenantId", args.tenantId)
+            .eq("harnessType", args.harnessType as string)
+            .eq("status", args.status as "queued")
+        )
+        .order("desc")
+        .take(take);
+    } else if (args.harnessType) {
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_harness_createdAt", (q) =>
+          q.eq("tenantId", args.tenantId).eq("harnessType", args.harnessType as string)
+        )
+        .order("desc")
+        .take(take);
     } else if (args.status) {
       rows = await ctx.db
         .query("harnessActivities")
