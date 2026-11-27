@@ -265,6 +265,36 @@ export default defineSchema({
    * Traza persistida de las tools del orquestador (S03): qué consultó/ejecutó,
    * resultado y a qué run/actividad apuntó. Sobrevive a recargas y es auditable.
    */
+  /**
+   * Propuestas de ejecución persistidas (S02b punto 2): la confirmación se vincula
+   * a este id y solo puede consumirse una vez (claim atómico).
+   */
+  agentToolProposals: defineTable({
+    chatId: v.id('chats'),
+    sessionId: v.id('orchestrationSessions'),
+    organizationId: v.id('organizations'),
+    agentKey: v.string(),
+    tool: v.string(),
+    args: v.any(),
+    summary: v.string(),
+    status: v.union(
+      v.literal('pending'),
+      v.literal('executing'),
+      v.literal('executed'),
+      v.literal('failed'),
+      v.literal('cancelled'),
+      v.literal('expired')
+    ),
+    result: v.optional(v.any()),
+    error: v.optional(v.string()),
+    createdAt: v.string(),
+    expiresAt: v.number(),
+    claimedAt: v.optional(v.string()),
+    finishedAt: v.optional(v.string()),
+  })
+    .index('by_chat', ['chatId'])
+    .index('by_session', ['sessionId'])
+    .index('by_status', ['status']),
   agentToolCalls: defineTable({
     chatId: v.id('chats'),
     sessionId: v.id('orchestrationSessions'),

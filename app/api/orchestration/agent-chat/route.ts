@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getAgentChat, listAgentToolCalls, listMessages } from '@/src/lib/convexServer';
+import {
+  getAgentChat,
+  listAgentToolCalls,
+  listAgentToolProposals,
+  listMessages,
+} from '@/src/lib/convexServer';
 import { errorResponse, guardRequest, isSafeId } from '@/src/lib/swarmyServer';
 
 /**
@@ -35,12 +40,13 @@ export async function GET(req: Request) {
       );
     }
 
-    const [messages, toolCalls] = resolved.chatId
+    const [messages, toolCalls, proposals] = resolved.chatId
       ? await Promise.all([
           listMessages({ chatId: resolved.chatId }),
           listAgentToolCalls({ chatId: resolved.chatId, limit: 20 }),
+          listAgentToolProposals({ chatId: resolved.chatId, status: 'pending', limit: 10 }),
         ])
-      : [[], []];
+      : [[], [], []];
 
     return NextResponse.json({
       ok: true,
@@ -49,6 +55,7 @@ export async function GET(req: Request) {
       agent: resolved.agent,
       messages,
       toolCalls,
+      proposals,
     });
   } catch (err) {
     return errorResponse(err, 'AGENT_CHAT_FETCH_FAILED');

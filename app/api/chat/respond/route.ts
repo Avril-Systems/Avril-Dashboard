@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, rejectLargePayload, requireDashboardToken } from '@/src/lib/apiSecurity';
 import {
+  cancelAgentToolProposal,
+  claimAgentToolProposal,
+  createAgentToolProposal,
+  finishAgentToolProposal,
   getDefaultOrganizationId,
   getOrCreateAgentChat,
   listChats,
@@ -67,8 +71,10 @@ type RequestBody = {
   organizationId?: string;
   /** `mock` solo existe en modo agente y solo fuera de producción (pruebas de plumbing). */
   model?: 'auto' | 'openai' | 'codex' | 'opus' | 'venice' | 'mock';
-  /** Confirmación explícita de una tool de escritura propuesta antes (S02b). */
-  confirmTool?: { tool?: string; arguments?: Record<string, unknown> };
+  /** Confirmación ligada a una propuesta persistida (punto 2). */
+  confirmProposalId?: string;
+  /** Cancelación de una propuesta pendiente. */
+  cancelProposalId?: string;
 };
 
 type PromptMode = 'architect' | 'agent';
@@ -90,6 +96,9 @@ type ApiErrorCode =
   | 'INFERENCE_CONFIG_MISSING'
   | 'INFERENCE_TIMEOUT'
   | 'INFERENCE_ERROR'
+  | 'PROPOSAL_NOT_FOUND'
+  | 'PROPOSAL_NOT_PENDING'
+  | 'PROPOSAL_MISMATCH'
   | 'INTERNAL_ERROR';
 
 type BridgeResult =
@@ -425,6 +434,12 @@ function resolveProvider(requested: RequestBody['model']): ProviderKind {
   return 'bridge';
 }
 
+function proposalError(reason: string): { status: number; code: ApiErrorCode } {
+  if (reason === 'not_found') return { status: 404, code: 'PROPOSAL_NOT_FOUND' };
+  if (reason === 'mismatch') return { status: 403, code: 'PROPOSAL_MISMATCH' };
+  return { status: 409, code: 'PROPOSAL_NOT_PENDING' };
+}
+
 export async function POST(req: Request) {
   try {
     if (!requireDashboardToken(req)) {
@@ -455,46 +470,112 @@ export async function POST(req: Request) {
     const message = body.message?.trim();
 
     /**
-     * S02b: confirmación explícita de una tool de ESCRITURA propuesta antes.
-     * No llama al modelo: valida de nuevo y ejecuta la acción real una sola vez.
+     * Punto 2: la confirmación se vincula a una propuesta persistida (`proposalId`).
+     * El claim es atómico (pending -> executing): una propuesta se ejecuta una sola vez.
+     * Se reutiliza la autenticación del endpoint y se valida sesión/agente/chat/org.
      */
-    const confirmToolRaw = body.confirmTool;
-    if (confirmToolRaw !== undefined) {
+    const confirmProposalId = body.confirmProposalId?.trim();
+    const cancelProposalId = body.cancelProposalId?.trim();
+
+    if (confirmProposalId || cancelProposalId) {
       if (!agentTarget) {
-        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere sessionId + agentKey.');
-      }
-
-      const toolName = typeof confirmToolRaw?.tool === 'string' ? confirmToolRaw.tool.trim() : '';
-      const rawArgs = confirmToolRaw?.arguments;
-      if (
-        !toolName ||
-        (rawArgs !== undefined &&
-          (rawArgs === null || typeof rawArgs !== 'object' || Array.isArray(rawArgs)))
-      ) {
-        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere { tool, arguments? }.');
-      }
-
-      const def = getAgentTool(toolName);
-      if (!def || def.kind !== 'write') {
-        return errorResponse(400, 'BAD_REQUEST', 'Solo se pueden confirmar tools de escritura.');
-      }
-
-      let resolvedConfirm: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
-      try {
-        resolvedConfirm = await getOrCreateAgentChat(agentTarget);
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        const notFound = /unknown agent/i.test(detail);
         return errorResponse(
-          notFound ? 404 : 502,
-          notFound ? 'AGENT_NOT_FOUND' : 'AGENT_CHAT_FAILED',
-          notFound ? 'Unknown agent for this session.' : 'Failed to resolve the agent conversation.',
-          { retryable: !notFound, details: detail }
+          400,
+          'BAD_REQUEST',
+          'confirmProposalId/cancelProposalId requieren sessionId + agentKey.'
+        );
+      }
+      if (confirmProposalId && cancelProposalId) {
+        return errorResponse(400, 'BAD_REQUEST', 'Envía solo confirmProposalId o cancelProposalId.');
+      }
+
+      if (cancelProposalId) {
+        let cancelled: Awaited<ReturnType<typeof cancelAgentToolProposal>>;
+        try {
+          cancelled = await cancelAgentToolProposal({
+            proposalId: cancelProposalId,
+            sessionId: agentTarget.sessionId,
+            agentKey: agentTarget.agentKey,
+          });
+        } catch (err) {
+          return errorResponse(502, 'CONVEX_ERROR', 'No se pudo cancelar la propuesta.', {
+            retryable: true,
+            details: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        if (!cancelled.ok) {
+          const { status, code } = proposalError(cancelled.reason ?? 'not_pending');
+          return errorResponse(
+            status,
+            code,
+            `No se pudo cancelar la propuesta (${cancelled.reason ?? 'not_pending'}${
+              cancelled.status ? `: ${cancelled.status}` : ''
+            }).`
+          );
+        }
+
+        return NextResponse.json({
+          ok: true,
+          mode: 'agent',
+          proposalId: cancelProposalId,
+          status: 'cancelled',
+        });
+      }
+
+      let claim: Awaited<ReturnType<typeof claimAgentToolProposal>>;
+      try {
+        claim = await claimAgentToolProposal({
+          proposalId: confirmProposalId as string,
+          sessionId: agentTarget.sessionId,
+          agentKey: agentTarget.agentKey,
+        });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo reclamar la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      if (!claim.ok) {
+        const { status, code } = proposalError(claim.reason);
+        return errorResponse(
+          status,
+          code,
+          `La propuesta no se puede confirmar (${claim.reason}${
+            claim.status ? `: ${claim.status}` : ''
+          }). No se ejecutó nada.`
         );
       }
 
-      const call: ToolCall = { tool: def.name, args: (rawArgs ?? {}) as Record<string, unknown> };
+      const def = getAgentTool(claim.proposal.tool);
+      if (!def || def.kind !== 'write') {
+        try {
+          await finishAgentToolProposal({
+            proposalId: claim.proposal._id,
+            status: 'failed',
+            error: 'Herramienta no válida en la propuesta.',
+          });
+        } catch {
+          // el claim ya evitó duplicados
+        }
+        return errorResponse(400, 'BAD_REQUEST', 'La propuesta no corresponde a una herramienta de escritura.');
+      }
+
+      const call: ToolCall = { tool: def.name, args: claim.proposal.args };
       const outcome = await executeConfirmedAgentTool(call);
+
+      try {
+        await finishAgentToolProposal({
+          proposalId: claim.proposal._id,
+          status: outcome.ok ? 'executed' : 'failed',
+          result: outcome.ok ? outcome.data : undefined,
+          error: outcome.ok ? undefined : outcome.error,
+        });
+      } catch {
+        // El claim es la garantía anti-duplicado; si no se puede cerrar, queda executing.
+      }
+
       const reply = summarizeConfirmedToolOutcome(outcome);
       const meta = buildTurnMeta({
         tools: [{ tool: call.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
@@ -504,9 +585,9 @@ export async function POST(req: Request) {
       try {
         const data = outcome.ok ? (outcome.data as any) : undefined;
         await recordAgentToolCall({
-          chatId: resolvedConfirm.chatId,
-          sessionId: agentTarget.sessionId,
-          agentKey: resolvedConfirm.agent.agentKey,
+          chatId: claim.proposal.chatId,
+          sessionId: claim.proposal.sessionId,
+          agentKey: claim.proposal.agentKey,
           tool: call.tool,
           args: call.args,
           ok: outcome.ok,
@@ -521,13 +602,13 @@ export async function POST(req: Request) {
       let warning: string | undefined;
       try {
         await sendMessage({
-          chatId: resolvedConfirm.chatId,
+          chatId: claim.proposal.chatId,
           content: `Confirmo: ${describeToolProposal(call)}`,
         });
         await sendAgentMessage({
-          chatId: resolvedConfirm.chatId,
+          chatId: claim.proposal.chatId,
           content: reply,
-          authorId: resolvedConfirm.agent.agentKey,
+          authorId: claim.proposal.agentKey,
           meta,
         });
       } catch (err) {
@@ -539,8 +620,10 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         mode: 'agent',
-        chatId: resolvedConfirm.chatId,
-        agentKey: resolvedConfirm.agent.agentKey,
+        chatId: claim.proposal.chatId,
+        agentKey: claim.proposal.agentKey,
+        proposalId: claim.proposal._id,
+        proposalStatus: outcome.ok ? 'executed' : 'failed',
         reply,
         toolCalls: [
           {
@@ -781,6 +864,22 @@ export async function POST(req: Request) {
         proposal: true,
       });
 
+      let createdProposal: { proposalId: string; expiresAt: number };
+      try {
+        createdProposal = await createAgentToolProposal({
+          chatId,
+          agentKey: agentAuthorId ?? '',
+          tool: call.tool,
+          args: call.args,
+          summary,
+        });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       try {
         await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
       } catch (err) {
@@ -797,7 +896,13 @@ export async function POST(req: Request) {
         ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
         reply,
         requiresConfirmation: true,
-        proposal: { tool: call.tool, arguments: call.args, summary },
+        proposal: {
+          id: createdProposal.proposalId,
+          expiresAt: createdProposal.expiresAt,
+          tool: call.tool,
+          arguments: call.args,
+          summary,
+        },
         intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
         meta,
       });
@@ -857,7 +962,13 @@ export async function POST(req: Request) {
      * Arquitecto: parser de siempre (JSON de ignición).
      */
     const toolCalls: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; error?: string }> = [];
-    let pendingProposal: { tool: string; arguments: Record<string, unknown>; summary: string } | null = null;
+    let pendingProposal: {
+      id: string;
+      expiresAt: number;
+      tool: string;
+      arguments: Record<string, unknown>;
+      summary: string;
+    } | null = null;
     let agentFinalText = result.text.trim();
 
     if (mode === 'agent' && agentTools.length > 0) {
@@ -869,7 +980,25 @@ export async function POST(req: Request) {
         if (callDef?.kind === 'write') {
           // S02b: nunca se ejecuta aquí. Se devuelve una propuesta y el operador confirma en la UI.
           const summary = describeToolProposal(parsedCall.call);
+          let createdProposal: { proposalId: string; expiresAt: number };
+          try {
+            createdProposal = await createAgentToolProposal({
+              chatId,
+              agentKey: agentAuthorId ?? '',
+              tool: parsedCall.call.tool,
+              args: parsedCall.call.args,
+              summary,
+            });
+          } catch (err) {
+            return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
+              retryable: true,
+              details: err instanceof Error ? err.message : String(err),
+            });
+          }
+
           pendingProposal = {
+            id: createdProposal.proposalId,
+            expiresAt: createdProposal.expiresAt,
             tool: parsedCall.call.tool,
             arguments: parsedCall.call.args,
             summary,

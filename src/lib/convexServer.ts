@@ -400,6 +400,116 @@ export async function listAgentToolCalls(args: {
   return Array.isArray(rows) ? rows : [];
 }
 
+/** Propuestas de ejecución persistidas (punto 2). */
+export type AgentToolProposalRow = {
+  _id: string;
+  tool: string;
+  args: unknown;
+  summary: string;
+  status: 'pending' | 'executing' | 'executed' | 'failed' | 'cancelled' | 'expired';
+  result: unknown;
+  error: string | null;
+  createdAt: string;
+  expiresAt: number;
+};
+
+export type ClaimedAgentProposal = {
+  _id: string;
+  chatId: string;
+  sessionId: string;
+  organizationId: string;
+  agentKey: string;
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+};
+
+export type ClaimProposalResult =
+  | { ok: true; proposal: ClaimedAgentProposal }
+  | { ok: false; reason: 'not_found' | 'not_pending' | 'expired' | 'mismatch'; status?: string };
+
+export async function createAgentToolProposal(args: {
+  chatId: string;
+  agentKey: string;
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+}): Promise<{ proposalId: string; expiresAt: number }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:createAgentToolProposalServer', {
+    chatId: args.chatId,
+    agentKey: args.agentKey,
+    tool: args.tool,
+    args: args.args,
+    summary: args.summary,
+    serverSecret,
+  });
+}
+
+export async function claimAgentToolProposal(args: {
+  proposalId: string;
+  sessionId: string;
+  agentKey: string;
+}): Promise<ClaimProposalResult> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:claimAgentToolProposalServer', {
+    proposalId: args.proposalId,
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  });
+}
+
+export async function finishAgentToolProposal(args: {
+  proposalId: string;
+  status: 'executed' | 'failed';
+  result?: unknown;
+  error?: string;
+}): Promise<{ ok: boolean; status?: string; reason?: string }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:finishAgentToolProposalServer', {
+    proposalId: args.proposalId,
+    status: args.status,
+    ...(args.result !== undefined ? { result: args.result } : {}),
+    ...(args.error ? { error: args.error } : {}),
+    serverSecret,
+  });
+}
+
+export async function cancelAgentToolProposal(args: {
+  proposalId: string;
+  sessionId: string;
+  agentKey: string;
+}): Promise<{ ok: boolean; status?: string; reason?: string }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:cancelAgentToolProposalServer', {
+    proposalId: args.proposalId,
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  });
+}
+
+export async function listAgentToolProposals(args: {
+  chatId: string;
+  status?: string;
+  limit?: number;
+}): Promise<AgentToolProposalRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverAgentChats:listAgentToolProposalsServer', {
+    chatId: args.chatId,
+    ...(args.status ? { status: args.status } : {}),
+    limit: args.limit ?? 20,
+    serverSecret,
+  })) as AgentToolProposalRow[];
+  return Array.isArray(rows) ? rows : [];
+}
+
 export async function getControlPlaneState(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();

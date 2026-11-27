@@ -47,7 +47,23 @@ type ServerMessage = {
 
 type PendingMessage = { content: string; at: number };
 
-type ToolProposal = { tool: string; arguments: Record<string, unknown>; summary: string };
+type ToolProposal = {
+  id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  summary: string;
+  expiresAt?: number;
+};
+
+type ServerProposal = {
+  _id: string;
+  tool: string;
+  args: unknown;
+  summary: string;
+  status: string;
+  createdAt: string;
+  expiresAt: number;
+};
 
 type ServerToolCall = {
   _id: string;
@@ -162,6 +178,19 @@ export default function OfficeAgentChat({
       setChatId(typeof data.chatId === 'string' ? data.chatId : null);
       setMessages(Array.isArray(data.messages) ? (data.messages as ServerMessage[]) : []);
       setToolCalls(Array.isArray(data.toolCalls) ? (data.toolCalls as ServerToolCall[]) : []);
+      const pending = Array.isArray(data.proposals) ? (data.proposals as ServerProposal[]) : [];
+      setProposal((current) =>
+        current ??
+        (pending[0]
+          ? {
+              id: pending[0]._id,
+              tool: pending[0].tool,
+              arguments: (pending[0].args ?? {}) as Record<string, unknown>,
+              summary: pending[0].summary,
+              expiresAt: pending[0].expiresAt,
+            }
+          : null)
+      );
     } catch (err) {
       if (activeAgentKeyRef.current !== requestedAgentKey) return;
       setError(err instanceof Error ? err.message : 'No se pudo cargar la conversación.');
@@ -239,11 +268,18 @@ export default function OfficeAgentChat({
       if (typeof data.chatId === 'string') setChatId(data.chatId);
 
       const rawProposal = data?.proposal;
-      if (data?.requiresConfirmation === true && rawProposal && typeof rawProposal.tool === 'string') {
+      if (
+        data?.requiresConfirmation === true &&
+        rawProposal &&
+        typeof rawProposal.id === 'string' &&
+        typeof rawProposal.tool === 'string'
+      ) {
         setProposal({
+          id: rawProposal.id,
           tool: rawProposal.tool,
           arguments: (rawProposal.arguments ?? {}) as Record<string, unknown>,
           summary: typeof rawProposal.summary === 'string' ? rawProposal.summary : '',
+          ...(typeof rawProposal.expiresAt === 'number' ? { expiresAt: rawProposal.expiresAt } : {}),
         });
       } else {
         setProposal(null);
@@ -281,12 +317,16 @@ export default function OfficeAgentChat({
         body: JSON.stringify({
           sessionId,
           agentKey: activeAgent.agentKey,
-          confirmTool: { tool: proposal.tool, arguments: proposal.arguments },
+          confirmProposalId: proposal.id,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.ok === false) {
         setError(data?.error?.message ?? `No se pudo ejecutar la acción (HTTP ${res.status}).`);
+        if (res.status === 404 || res.status === 409) {
+          setProposal(null);
+          void load();
+        }
         return;
       }
       setProposal(null);
@@ -301,10 +341,35 @@ export default function OfficeAgentChat({
     }
   }, [proposal, activeAgent, sessionId, sending, authHeaders, load]);
 
-  const cancelProposal = useCallback(() => {
-    setProposal(null);
-    setToolNote(null);
-  }, []);
+  const cancelProposal = useCallback(async () => {
+    if (!proposal || !activeAgent || !sessionId) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/chat/respond', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          sessionId,
+          agentKey: activeAgent.agentKey,
+          cancelProposalId: proposal.id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        setError(data?.error?.message ?? `No se pudo cancelar la propuesta (HTTP ${res.status}).`);
+        return;
+      }
+      setProposal(null);
+      setToolNote(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cancelar la propuesta.');
+    } finally {
+      setSending(false);
+      void load();
+    }
+  }, [proposal, activeAgent, sessionId, sending, authHeaders, load]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -518,6 +583,13 @@ export default function OfficeAgentChat({
             Acción pendiente de confirmación
           </p>
           <p className="whitespace-pre-wrap text-[11px] text-amber-100/90">{proposal.summary || proposal.tool}</p>
+          {proposal.expiresAt ? (
+            <p className="text-[10px] text-amber-200/70">
+              Propuesta {proposal.id} · válida hasta {new Date(proposal.expiresAt).toLocaleTimeString()}
+            </p>
+          ) : (
+            <p className="text-[10px] text-amber-200/70">Propuesta {proposal.id}</p>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -529,7 +601,7 @@ export default function OfficeAgentChat({
             </button>
             <button
               type="button"
-              onClick={cancelProposal}
+              onClick={() => void cancelProposal()}
               disabled={sending}
               className="rounded-full border border-border/60 bg-background/40 px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
             >
