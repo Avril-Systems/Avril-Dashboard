@@ -564,6 +564,199 @@ export async function setSessionHarnessIntention(args: {
   });
 }
 
+/** Metacognition v0.1 (host storage). */
+export type MetacognitionStateRow = {
+  agentKey: string;
+  enabled: boolean;
+  cadenceMs: number;
+  lastCycleAt: string | null;
+  lastProcessedAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: number | null;
+};
+
+export type MetacognitionLessonRow = {
+  _id: string;
+  lesson: string;
+  status: 'tentative' | 'observed';
+  sourceCycleId: string;
+  experienceRefs: string[];
+  createdAt: string;
+};
+
+export type MetacognitionExperienceRow = {
+  _id: string;
+  role: string;
+  authorId: string;
+  content: string;
+  createdAt: string;
+};
+
+export async function enableMetacognition(args: {
+  sessionId: string;
+  agentKey: string;
+  enabled: boolean;
+  cadenceMs?: number;
+}): Promise<{ enabled: boolean; cadenceMs: number }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverMetacognition:enableMetacognitionServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    enabled: args.enabled,
+    ...(args.cadenceMs !== undefined ? { cadenceMs: args.cadenceMs } : {}),
+    serverSecret,
+  });
+}
+
+export async function listMetacognitionStates(args: {
+  sessionId: string;
+}): Promise<MetacognitionStateRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverMetacognition:listMetacognitionStatesServer', {
+    sessionId: args.sessionId,
+    serverSecret,
+  })) as MetacognitionStateRow[];
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function getMetacognitionLessons(args: {
+  sessionId: string;
+  agentKey: string;
+}): Promise<MetacognitionLessonRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverMetacognition:getMetacognitionLessonsServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  })) as MetacognitionLessonRow[];
+  return Array.isArray(rows) ? rows : [];
+}
+
+export type MetacognitionClaim =
+  | { ok: true; cycleId: string; cursor: string | null; cadenceMs: number }
+  | { ok: false; reason: 'disabled' | 'leased' | 'not_due' };
+
+export async function claimMetacognitionCycle(args: {
+  sessionId: string;
+  agentKey: string;
+  leaseOwner: string;
+}): Promise<MetacognitionClaim> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverMetacognition:claimMetacognitionCycleServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    leaseOwner: args.leaseOwner,
+    serverSecret,
+  });
+}
+
+export async function listMetacognitionExperience(args: {
+  sessionId: string;
+  agentKey: string;
+  since?: string | null;
+  limit?: number;
+}): Promise<MetacognitionExperienceRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverMetacognition:listMetacognitionExperienceServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    ...(args.since ? { since: args.since } : {}),
+    limit: args.limit ?? 12,
+    serverSecret,
+  })) as MetacognitionExperienceRow[];
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function skipMetacognitionCycle(args: {
+  cycleId: string;
+  leaseOwner: string;
+  inputCount: number;
+}): Promise<{ ok: boolean; reason?: string }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverMetacognition:skipMetacognitionCycleServer', {
+    cycleId: args.cycleId,
+    leaseOwner: args.leaseOwner,
+    inputCount: args.inputCount,
+    serverSecret,
+  });
+}
+
+export async function completeMetacognitionCycle(args: {
+  cycleId: string;
+  leaseOwner: string;
+  lessons: Array<{ lesson: string; status: 'tentative' | 'observed'; experienceRefs?: string[] }>;
+  cursorAfter: string;
+  inputCount: number;
+  model?: string;
+}): Promise<{ ok: boolean; added?: number; active?: number; reason?: string }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverMetacognition:completeMetacognitionCycleServer', {
+    cycleId: args.cycleId,
+    leaseOwner: args.leaseOwner,
+    lessons: args.lessons,
+    cursorAfter: args.cursorAfter,
+    inputCount: args.inputCount,
+    ...(args.model ? { model: args.model } : {}),
+    serverSecret,
+  });
+}
+
+export async function failMetacognitionCycle(args: {
+  cycleId: string;
+  leaseOwner: string;
+  error: string;
+  inferenceCalls: number;
+  inputCount: number;
+}): Promise<{ ok: boolean; reason?: string }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverMetacognition:failMetacognitionCycleServer', {
+    cycleId: args.cycleId,
+    leaseOwner: args.leaseOwner,
+    error: args.error,
+    inferenceCalls: args.inferenceCalls,
+    inputCount: args.inputCount,
+    serverSecret,
+  });
+}
+
+export type MetacognitionCycleRow = {
+  _id: string;
+  status: 'running' | 'success' | 'skipped' | 'failed';
+  inferenceCalls: number;
+  inputCount: number;
+  cursorAfter: string | null;
+  model: string | null;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+export async function listMetacognitionCycles(args: {
+  sessionId: string;
+  agentKey: string;
+  limit?: number;
+}): Promise<MetacognitionCycleRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverMetacognition:listMetacognitionCyclesServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    limit: args.limit ?? 10,
+    serverSecret,
+  })) as MetacognitionCycleRow[];
+  return Array.isArray(rows) ? rows : [];
+}
+
 export async function getControlPlaneState(args: { organizationId?: string }) {
   const client = getClient();
   const serverSecret = requireServerSecret();

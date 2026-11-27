@@ -246,7 +246,9 @@ export default defineSchema({
     /** Metacognición del turno (S06): fuentes, confianza, límites. Solo en respuestas de agente. */
     meta: v.optional(v.any()),
     createdAt: v.string(),
-  }).index('by_chat', ['chatId']),
+  })
+    .index('by_chat', ['chatId'])
+    .index('by_chat_createdAt', ['chatId', 'createdAt']),
   /** Latest Avril chat → ignition export for this thread (full demo path). */
   chatIgnitionDrafts: defineTable({
     organizationId: v.id('organizations'),
@@ -327,6 +329,59 @@ export default defineSchema({
     .index('by_session', ['sessionId'])
     .index('by_session_scope', ['sessionId', 'scope'])
     .index('by_session_harness', ['sessionId', 'harnessType']),
+  /** Metacognition v0.1: estado por agente (habilitado, cadencia, cursor, lease). */
+  metacognitionStates: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    organizationId: v.id('organizations'),
+    enabled: v.boolean(),
+    cadenceMs: v.number(),
+    lastCycleAt: v.optional(v.string()),
+    lastProcessedAt: v.optional(v.string()),
+    leaseOwner: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    lastStatus: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  })
+    .index('by_session_agent', ['sessionId', 'agentKey'])
+    .index('by_session', ['sessionId']),
+  /** Lecciones privadas por agente; histórico con retiro, nunca se reescribe. */
+  metacognitionLessons: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    organizationId: v.id('organizations'),
+    lesson: v.string(),
+    status: v.union(v.literal('tentative'), v.literal('observed')),
+    sourceCycleId: v.string(),
+    experienceRefs: v.optional(v.array(v.string())),
+    createdAt: v.string(),
+    retiredAt: v.optional(v.string()),
+  })
+    .index('by_session_agent', ['sessionId', 'agentKey'])
+    .index('by_session_agent_created', ['sessionId', 'agentKey', 'createdAt']),
+  /** Intentos de ciclo (uno por claim); incluye skipped/failed. */
+  metacognitionCycles: defineTable({
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    organizationId: v.id('organizations'),
+    status: v.union(
+      v.literal('running'),
+      v.literal('success'),
+      v.literal('skipped'),
+      v.literal('failed')
+    ),
+    inferenceCalls: v.number(),
+    inputCount: v.number(),
+    cursorAfter: v.optional(v.string()),
+    model: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.string(),
+    finishedAt: v.optional(v.string()),
+  })
+    .index('by_session_agent', ['sessionId', 'agentKey'])
+    .index('by_status', ['status']),
   wallets: defineTable({ organizationId: v.id('organizations'), ownerUserId: v.id('users'), provider: v.string(), address: v.string(), createdAt: v.string() }).index('by_org', ['organizationId']),
   walletPermissions: defineTable({ walletId: v.id('wallets'), memberUserId: v.id('users'), permission: v.union(v.literal('view'), v.literal('propose'), v.literal('execute'), v.literal('approve')), createdAt: v.string() }).index('by_wallet_user', ['walletId', 'memberUserId']),
   approvals: defineTable({

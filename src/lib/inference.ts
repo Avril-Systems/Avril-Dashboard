@@ -105,8 +105,10 @@ export async function callOpenAICompatible(input: {
   config: InferenceConfig;
   messages: ChatMessage[];
   temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
 }): Promise<InferenceResult> {
-  const timeoutMs = inferenceTimeoutMs();
+  const timeoutMs = Math.min(180000, Math.max(1000, input.timeoutMs ?? inferenceTimeoutMs()));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -121,6 +123,7 @@ export async function callOpenAICompatible(input: {
         model: input.config.model,
         messages: input.messages,
         temperature: input.temperature ?? inferenceTemperature(),
+        ...(input.maxTokens && input.maxTokens > 0 ? { max_tokens: input.maxTokens } : {}),
       }),
       cache: 'no-store',
       signal: controller.signal,

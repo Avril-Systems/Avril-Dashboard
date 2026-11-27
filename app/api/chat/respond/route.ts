@@ -8,6 +8,7 @@ import {
   getAgentChat,
   getDefaultOrganizationId,
   getOrCreateAgentChat,
+  getMetacognitionLessons,
   getSessionIntentions,
   listChats,
   listMessages,
@@ -41,6 +42,7 @@ import {
 } from '@/src/modules/agents/toolCatalog';
 import { isActivityForHarness } from '@/convex/lib/harnessActivities';
 import { buildTurnMeta } from '@/src/modules/agents/turnMeta';
+import { selectRelevantLessons } from '@/src/modules/metacognition/lessons';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
 import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
 import {
@@ -772,10 +774,25 @@ export async function POST(req: Request) {
         sessionIntentions = null;
       }
 
+      let metacognitionLessons: string[] = [];
+      try {
+        const lessons = await getMetacognitionLessons({
+          sessionId: agentSessionId,
+          agentKey: identity.agentKey,
+        });
+        metacognitionLessons = selectRelevantLessons(
+          lessons.map((lesson) => ({ lesson: lesson.lesson, status: lesson.status })),
+          message
+        );
+      } catch {
+        metacognitionLessons = [];
+      }
+
       systemPrompt = buildAgentSystemPrompt(identity, {
         sessionId,
         tools: agentTools,
         intentions: sessionIntentions,
+        metacognitionLessons,
       });
       intentionReminder = buildIntentionReminder(identity, sessionIntentions) ?? undefined;
       agentIdentity = identity;
