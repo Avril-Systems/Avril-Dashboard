@@ -18,7 +18,9 @@ import type * as lib_agentAreas from "../lib/agentAreas.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_companyDisplayName from "../lib/companyDisplayName.js";
 import type * as lib_founderPrompts from "../lib/founderPrompts.js";
+import type * as lib_harnessActivities from "../lib/harnessActivities.js";
 import type * as lib_venice from "../lib/venice.js";
+import type * as serverAgentChats from "../serverAgentChats.js";
 import type * as serverChatIgnition from "../serverChatIgnition.js";
 import type * as serverChats from "../serverChats.js";
 import type * as serverControlPlane from "../serverControlPlane.js";
@@ -27,6 +29,7 @@ import type * as serverFounder from "../serverFounder.js";
 import type * as serverOrchestration from "../serverOrchestration.js";
 import type * as serverUsers from "../serverUsers.js";
 import type * as summarize from "../summarize.js";
+import type * as testSwarmy from "../testSwarmy.js";
 
 import type {
   ApiFromModules,
@@ -45,7 +48,9 @@ declare const fullApi: ApiFromModules<{
   "lib/authz": typeof lib_authz;
   "lib/companyDisplayName": typeof lib_companyDisplayName;
   "lib/founderPrompts": typeof lib_founderPrompts;
+  "lib/harnessActivities": typeof lib_harnessActivities;
   "lib/venice": typeof lib_venice;
+  serverAgentChats: typeof serverAgentChats;
   serverChatIgnition: typeof serverChatIgnition;
   serverChats: typeof serverChats;
   serverControlPlane: typeof serverControlPlane;
@@ -54,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   serverOrchestration: typeof serverOrchestration;
   serverUsers: typeof serverUsers;
   summarize: typeof summarize;
+  testSwarmy: typeof testSwarmy;
 }>;
 
 /**

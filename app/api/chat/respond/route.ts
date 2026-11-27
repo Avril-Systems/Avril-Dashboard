@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { getClientIp, hitRateLimit, rejectLargePayload, requireDashboardToken } from '@/src/lib/apiSecurity';
 import {
   getDefaultOrganizationId,
+  getOrCreateAgentChat,
   listChats,
   listMessages,
+  recordAgentToolCall,
   sendMessage,
   sendAgentMessage,
   upsertChatIgnitionDraft,
@@ -13,6 +15,24 @@ import {
   augmentUserMessageForModel,
   buildAvrilUnifiedSystemPrompt,
 } from '@/src/modules/avril/buildAvrilSystemPrompt';
+import {
+  augmentAgentMessageForModel,
+  buildAgentSystemPrompt,
+} from '@/src/modules/agents/buildAgentSystemPrompt';
+import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
+import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
+import { AGENT_TOOLS, getAgentTool } from '@/src/modules/agents/toolCatalog';
+import { detectIntent } from '@/src/modules/agents/intent';
+import { buildTurnMeta } from '@/src/modules/agents/turnMeta';
+import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
+import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
+import {
+  executeAgentTool,
+  executeConfirmedAgentTool,
+  summarizeConfirmedToolOutcome,
+  summarizeToolOutcome,
+} from '@/src/modules/agents/executeAgentTool';
+import type { ToolCall } from '@/src/modules/agents/toolProtocol';
 import { parseAvrilAssistantReply } from '@/src/modules/avril/parseAvrilAssistantReply';
 import { extractDraftFromArchitectPayload } from '@/src/modules/avril/extractDraftFromArchitectPayload';
 import { isFolderAgentBriefMessage } from '@/src/lib/orchestrationSwarmGuardrails';
@@ -32,11 +52,20 @@ const MAX_AGENT_BRIEF_CHARS = 56 * 1024;
 const RESPOND_MAX_BODY_BYTES = 128 * 1024;
 
 type RequestBody = {
-  chatId: string;
+  /** Architect mode: the founder chat. */
+  chatId?: string;
+  /** Agent mode: session + agentKey identify the 1:1 agent conversation (chatId is resolved server-side). */
+  sessionId?: string;
+  agentKey?: string;
   message: string;
   organizationId?: string;
-  model?: 'codex' | 'opus' | 'venice';
+  /** `mock` solo existe en modo agente y solo fuera de producción (pruebas de plumbing). */
+  model?: 'codex' | 'opus' | 'venice' | 'mock';
+  /** Confirmación explícita de una tool de escritura propuesta antes (S02b). */
+  confirmTool?: { tool?: string; arguments?: Record<string, unknown> };
 };
+
+type PromptMode = 'architect' | 'agent';
 
 type ApiErrorCode =
   | 'UNAUTHORIZED'
@@ -45,6 +74,8 @@ type ApiErrorCode =
   | 'BAD_REQUEST'
   | 'CONFIG_ERROR'
   | 'CHAT_NOT_FOUND'
+  | 'AGENT_NOT_FOUND'
+  | 'AGENT_CHAT_FAILED'
   | 'CONVEX_ERROR'
   | 'BRIDGE_TIMEOUT'
   | 'BRIDGE_ERROR'
@@ -79,6 +110,7 @@ function errorResponse(
 type BridgeInput = {
   chatId: string;
   message: string;
+  mode?: PromptMode;
   model?: 'codex' | 'opus' | 'venice';
   agentId?: string;
   area?: string;
@@ -86,13 +118,41 @@ type BridgeInput = {
   summary?: string;
   messages?: Array<{ authorType: string; authorId: string; content: string; createdAt: string }>;
   maxContextChars?: number;
-  /** Full Avril architect system prompt (shared Venice + OpenClaw). */
+  /** System prompt: Avril architect (founder flow) or the targeted agent's persona. */
   systemPrompt?: string;
 };
 
 type VeniceResult =
   | { ok: true; text: string }
   | { ok: false; code: 'VENICE_TIMEOUT' | 'VENICE_ERROR'; message: string; retryable: boolean };
+
+function augmentForMode(mode: PromptMode | undefined, message: string): string {
+  return mode === 'agent' ? augmentAgentMessageForModel(message) : augmentUserMessageForModel(message);
+}
+
+/**
+ * Respuesta de pruebas (solo dev, solo modo agente): valida identidad, hilo por
+ * agente y persistencia sin llamar a Venice ni al bridge. Nunca se presenta como
+ * respuesta real: el texto va marcado como MOCK.
+ */
+function buildMockAgentReply(
+  identity: ResolvedAgentIdentity | null,
+  message: string,
+  historyCount: number
+): string {
+  const name = identity?.name ?? 'Agente';
+  const key = identity?.agentKey ?? 'desconocido';
+  const harness = identity?.persona.harnessType ?? 'sin arnés (orquestador)';
+  return [
+    '[MOCK · respuesta simulada, sin modelo real]',
+    '',
+    `Soy **${name}** (\`${key}\`). Arnés: ${harness}.`,
+    `Mensaje recibido: “${message.slice(0, 500)}”`,
+    `Mensajes previos en este hilo: ${historyCount}.`,
+    '',
+    'Esto valida identidad, hilo por agente y persistencia. No valida Venice ni el bridge.',
+  ].join('\n');
+}
 
 function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const base = input.systemPrompt?.trim() || buildAvrilUnifiedSystemPrompt();
@@ -111,7 +171,7 @@ function buildVeniceMessages(input: BridgeInput): Array<{ role: 'system' | 'user
     { role: 'system', content: systemMain },
     ...(input.summary ? [{ role: 'system' as const, content: `Conversation summary: ${input.summary}` }] : []),
     ...fromContext,
-    { role: 'user', content: augmentUserMessageForModel(input.message) },
+    { role: 'user', content: augmentForMode(input.mode, input.message) },
   ];
 }
 
@@ -248,7 +308,7 @@ async function callOpenClawBridge(input: BridgeInput): Promise<BridgeResult> {
           Authorization: `Bearer ${bridgeToken}`,
         },
         body: JSON.stringify({
-          message: augmentUserMessageForModel(input.message),
+          message: augmentForMode(input.mode, input.message),
           model: input.model ?? 'codex',
           source: 'avril-dashboard',
           chatId: input.chatId,
@@ -356,11 +416,120 @@ export async function POST(req: Request) {
       return errorResponse(400, 'BAD_REQUEST', 'Invalid JSON body.');
     }
 
-    const chatId = body.chatId?.trim();
+    const chatIdFromBody = body.chatId?.trim();
+    const sessionId = body.sessionId?.trim();
+    const agentKey = body.agentKey?.trim();
+    const agentTarget = sessionId && agentKey ? { sessionId, agentKey } : null;
+    const agentSessionId = agentTarget?.sessionId ?? '';
     const message = body.message?.trim();
 
-    if (!chatId || !message) {
-      return errorResponse(400, 'BAD_REQUEST', 'chatId and message are required.');
+    /**
+     * S02b: confirmación explícita de una tool de ESCRITURA propuesta antes.
+     * No llama al modelo: valida de nuevo y ejecuta la acción real una sola vez.
+     */
+    const confirmToolRaw = body.confirmTool;
+    if (confirmToolRaw !== undefined) {
+      if (!agentTarget) {
+        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere sessionId + agentKey.');
+      }
+
+      const toolName = typeof confirmToolRaw?.tool === 'string' ? confirmToolRaw.tool.trim() : '';
+      const rawArgs = confirmToolRaw?.arguments;
+      if (
+        !toolName ||
+        (rawArgs !== undefined &&
+          (rawArgs === null || typeof rawArgs !== 'object' || Array.isArray(rawArgs)))
+      ) {
+        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere { tool, arguments? }.');
+      }
+
+      const def = getAgentTool(toolName);
+      if (!def || def.kind !== 'write') {
+        return errorResponse(400, 'BAD_REQUEST', 'Solo se pueden confirmar tools de escritura.');
+      }
+
+      let resolvedConfirm: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
+      try {
+        resolvedConfirm = await getOrCreateAgentChat(agentTarget);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const notFound = /unknown agent/i.test(detail);
+        return errorResponse(
+          notFound ? 404 : 502,
+          notFound ? 'AGENT_NOT_FOUND' : 'AGENT_CHAT_FAILED',
+          notFound ? 'Unknown agent for this session.' : 'Failed to resolve the agent conversation.',
+          { retryable: !notFound, details: detail }
+        );
+      }
+
+      const call: ToolCall = { tool: def.name, args: (rawArgs ?? {}) as Record<string, unknown> };
+      const outcome = await executeConfirmedAgentTool(call);
+      const reply = summarizeConfirmedToolOutcome(outcome);
+      const meta = buildTurnMeta({
+        tools: [{ tool: call.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
+        executed: outcome.ok,
+      });
+
+      try {
+        const data = outcome.ok ? (outcome.data as any) : undefined;
+        await recordAgentToolCall({
+          chatId: resolvedConfirm.chatId,
+          sessionId: agentTarget.sessionId,
+          agentKey: resolvedConfirm.agent.agentKey,
+          tool: call.tool,
+          args: call.args,
+          ok: outcome.ok,
+          error: outcome.ok ? undefined : outcome.error,
+          runId: typeof data?.runId === 'string' ? data.runId : undefined,
+          activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
+        });
+      } catch {
+        // La traza no debe romper una acción que ya se ejecutó.
+      }
+
+      let warning: string | undefined;
+      try {
+        await sendMessage({
+          chatId: resolvedConfirm.chatId,
+          content: `Confirmo: ${describeToolProposal(call)}`,
+        });
+        await sendAgentMessage({
+          chatId: resolvedConfirm.chatId,
+          content: reply,
+          authorId: resolvedConfirm.agent.agentKey,
+          meta,
+        });
+      } catch (err) {
+        warning = `La acción se procesó, pero no se pudo persistir el mensaje: ${
+          err instanceof Error ? err.message : String(err)
+        }`;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode: 'agent',
+        chatId: resolvedConfirm.chatId,
+        agentKey: resolvedConfirm.agent.agentKey,
+        reply,
+        toolCalls: [
+          {
+            tool: outcome.tool,
+            args: call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          },
+        ],
+        meta,
+        ...(warning ? { warning } : {}),
+      });
+    }
+
+    if ((!chatIdFromBody && !agentTarget) || !message) {
+      return errorResponse(
+        400,
+        'BAD_REQUEST',
+        'chatId, or sessionId + agentKey, and message are required.'
+      );
     }
 
     if (message.length > MAX_AGENT_BRIEF_CHARS) {
@@ -374,27 +543,87 @@ export async function POST(req: Request) {
       );
     }
 
-    let existingChats: any[];
-    try {
-      existingChats = await listChats({ organizationId: body.organizationId });
-    } catch (err) {
-      return errorResponse(502, 'CONVEX_ERROR', 'Failed to validate chat against Convex.', {
-        retryable: true,
-        details: err instanceof Error ? err.message : String(err),
+    /**
+     * Dos modos sobre el mismo endpoint:
+     *   - agent:     conversación 1:1 con un agente del Agent Office. El chat se resuelve
+     *                en el servidor por (sessionId, agentKey); el cliente no puede elegirlo.
+     *   - architect: flujo Avril de siempre (entrevista founder + ignition draft), sin cambios.
+     */
+    const mode: PromptMode = agentTarget ? 'agent' : 'architect';
+
+    let chatId: string;
+    let systemPrompt: string;
+    let agentAuthorId: string | undefined;
+    let agentId: string | undefined;
+    let area: string | undefined;
+    let subArea: string | undefined;
+    let hasSummary = false;
+    let summaryText: string | undefined;
+    let agentIdentity: ResolvedAgentIdentity | null = null;
+    let agentTools: AgentToolDef[] = [];
+
+    if (agentTarget) {
+      let resolved: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
+      try {
+        resolved = await getOrCreateAgentChat(agentTarget);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const notFound = /unknown agent/i.test(detail);
+        return errorResponse(
+          notFound ? 404 : 502,
+          notFound ? 'AGENT_NOT_FOUND' : 'AGENT_CHAT_FAILED',
+          notFound ? 'Unknown agent for this session.' : 'Failed to resolve the agent conversation.',
+          { retryable: !notFound, details: detail }
+        );
+      }
+
+      chatId = resolved.chatId;
+      agentAuthorId = resolved.agent.agentKey;
+      const identity = resolveAgentIdentity({
+        agentKey: resolved.agent.agentKey,
+        name: resolved.agent.name,
+        role: resolved.agent.role,
+        meta: resolved.agent.meta,
       });
-    }
+      // S02a: las tools de lectura son capacidad del orquestador (agente sin arnés).
+      agentTools = identity.persona.harnessType === null ? AGENT_TOOLS : [];
+      systemPrompt = buildAgentSystemPrompt(identity, { sessionId, tools: agentTools });
+      agentIdentity = identity;
+    } else {
+      const requestedChatId = chatIdFromBody as string;
 
-    if (!Array.isArray(existingChats) || !existingChats.some((c: any) => c?._id === chatId)) {
-      return errorResponse(400, 'CHAT_NOT_FOUND', 'Invalid chatId. The selected chat no longer exists.');
-    }
+      let existingChats: any[];
+      try {
+        existingChats = await listChats({ organizationId: body.organizationId });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'Failed to validate chat against Convex.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
 
-    const currentChat = existingChats.find((c: any) => c?._id === chatId) as
-      | { _id: string; agentId?: string; agent?: { name: string; area?: string; subArea?: string }; summary?: string; summaryUpdatedAt?: string }
-      | undefined;
-    const agentId = currentChat?.agentId;
-    const area = currentChat?.agent?.area;
-    const subArea = currentChat?.agent?.subArea;
-    const hasSummary = Boolean(currentChat?.summary?.trim());
+      if (!Array.isArray(existingChats) || !existingChats.some((c: any) => c?._id === requestedChatId)) {
+        return errorResponse(400, 'CHAT_NOT_FOUND', 'Invalid chatId. The selected chat no longer exists.');
+      }
+
+      const currentChat = existingChats.find((c: any) => c?._id === requestedChatId) as
+        | {
+            _id: string;
+            agentId?: string;
+            agent?: { name: string; area?: string; subArea?: string };
+            summary?: string;
+            summaryUpdatedAt?: string;
+          }
+        | undefined;
+
+      chatId = requestedChatId;
+      agentId = currentChat?.agentId;
+      area = currentChat?.agent?.area;
+      subArea = currentChat?.agent?.subArea;
+      hasSummary = Boolean(currentChat?.summary?.trim());
+      summaryText = hasSummary ? currentChat?.summary?.trim() : undefined;
+      systemPrompt = buildAvrilUnifiedSystemPrompt();
+    }
 
     try {
       await sendMessage({ chatId, content: message });
@@ -408,8 +637,13 @@ export async function POST(req: Request) {
     let contextMessages: NonNullable<BridgeInput['messages']> = [];
     try {
       const allMessages = await listMessages({ chatId });
+      // El mensaje actual ya se persistió arriba: no lo mandes otra vez como contexto.
+      const history =
+        allMessages.length > 0 && allMessages[allMessages.length - 1]?.content === message
+          ? allMessages.slice(0, -1)
+          : allMessages;
       const limit = hasSummary ? BRIDGE_CONTEXT_LAST_N_WHEN_SUMMARY : BRIDGE_CONTEXT_LAST_N;
-      const lastN = allMessages.slice(-limit).map((m: any) => {
+      const lastN = history.slice(-limit).map((m: any) => {
         const content = String(m.content ?? '').trim();
         const truncated =
           content.length <= BRIDGE_CONTEXT_MAX_CONTENT_CHARS
@@ -427,22 +661,139 @@ export async function POST(req: Request) {
       // Proceed without context if listing fails
     }
 
-    const architectPrompt = buildAvrilUnifiedSystemPrompt();
     const input: BridgeInput = {
       chatId,
       message,
-      model: body.model,
+      mode,
+      model: body.model === 'mock' ? undefined : body.model,
       agentId,
       area,
       subArea,
-      systemPrompt: architectPrompt,
-      ...(hasSummary && currentChat?.summary && { summary: currentChat.summary.trim() }),
+      systemPrompt,
+      ...(summaryText ? { summary: summaryText } : {}),
       messages: contextMessages.length > 0 ? contextMessages : undefined,
       maxContextChars: BRIDGE_CONTEXT_MAX_CHARS,
     };
 
-    const result =
-      body.model === 'venice' ? await callVeniceInference(input) : await callOpenClawBridge(input);
+    /**
+     * S05: enrutado determinista por intención. Evita depender de que Venice emita el
+     * bloque de tool. Solo aplica al orquestador y con señales de alta confianza.
+     */
+    const detectedIntent =
+      mode === 'agent' && agentTools.length > 0 ? detectIntent(message) : ({ kind: 'none' } as const);
+
+    if (detectedIntent.kind === 'read') {
+      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
+      const outcome = await executeAgentTool(call, { sessionId: agentSessionId });
+
+      try {
+        const data = outcome.ok ? (outcome.data as any) : undefined;
+        await recordAgentToolCall({
+          chatId,
+          sessionId: agentSessionId,
+          agentKey: agentAuthorId ?? 'agent',
+          tool: outcome.tool,
+          args: call.args,
+          ok: outcome.ok,
+          error: outcome.ok ? undefined : outcome.error,
+          runId: typeof data?.runId === 'string' ? data.runId : undefined,
+          activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
+        });
+      } catch {
+        // La traza no debe romper la respuesta.
+      }
+
+      const reply = summarizeToolOutcome(outcome);
+      const meta = buildTurnMeta({
+        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
+        tools: [{ tool: outcome.tool, ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) }],
+      });
+      try {
+        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'Tool ejecutada pero falló al persistir la respuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode,
+        chatId,
+        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
+        reply,
+        toolCalls: [
+          {
+            tool: outcome.tool,
+            args: call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          },
+        ],
+        intent: { kind: 'read', tool: detectedIntent.tool, reason: detectedIntent.reason },
+        meta,
+      });
+    }
+
+    if (detectedIntent.kind === 'proposal' || detectedIntent.kind === 'control') {
+      const call: ToolCall = { tool: detectedIntent.tool, args: detectedIntent.args };
+      const summary = describeToolProposal(call);
+      const reply = [
+        `Propongo ejecutar \`${call.tool}\`:`,
+        summary,
+        '',
+        'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
+      ].join('\n');
+      const meta = buildTurnMeta({
+        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
+        tools: [],
+        proposal: true,
+      });
+
+      try {
+        await sendAgentMessage({ chatId, content: reply, authorId: agentAuthorId ?? 'agent', meta });
+      } catch (err) {
+        return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
+          retryable: true,
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode,
+        chatId,
+        ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
+        reply,
+        requiresConfirmation: true,
+        proposal: { tool: call.tool, arguments: call.args, summary },
+        intent: { kind: detectedIntent.kind, tool: call.tool, reason: detectedIntent.reason },
+        meta,
+      });
+    }
+
+    const wantsMock = body.model === 'mock';
+    if (wantsMock && mode !== 'agent') {
+      return errorResponse(400, 'BAD_REQUEST', 'El modelo mock solo existe en modo agente.');
+    }
+    if (wantsMock && process.env.NODE_ENV === 'production') {
+      return errorResponse(400, 'BAD_REQUEST', 'El modelo mock está deshabilitado en producción.');
+    }
+
+    const callModel = async (modelInput: BridgeInput) => {
+      if (wantsMock) {
+        return {
+          ok: true as const,
+          text: buildMockAgentReply(agentIdentity, modelInput.message, contextMessages.length),
+        };
+      }
+      return modelInput.model === 'venice'
+        ? await callVeniceInference(modelInput)
+        : await callOpenClawBridge(modelInput);
+    };
+
+    const result = await callModel(input);
 
     if (!result.ok) {
       return errorResponse(502, result.code, result.message, {
@@ -451,10 +802,99 @@ export async function POST(req: Request) {
       });
     }
 
-    const { displayText, architectPayload } = parseAvrilAssistantReply(result.text);
+    /**
+     * Modo agente: texto plano + una tool de lectura opcional (S02a).
+     * El bloque lo valida `parseToolCall`; si el modelo no lo usa, es texto normal.
+     * Arquitecto: parser de siempre (JSON de ignición).
+     */
+    const toolCalls: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; error?: string }> = [];
+    let pendingProposal: { tool: string; arguments: Record<string, unknown>; summary: string } | null = null;
+    let agentFinalText = result.text.trim();
+
+    if (mode === 'agent' && agentTools.length > 0) {
+      const parsedCall = parseToolCall(result.text);
+
+      if (parsedCall.kind === 'call') {
+        const callDef = getAgentTool(parsedCall.call.tool);
+
+        if (callDef?.kind === 'write') {
+          // S02b: nunca se ejecuta aquí. Se devuelve una propuesta y el operador confirma en la UI.
+          const summary = describeToolProposal(parsedCall.call);
+          pendingProposal = {
+            tool: parsedCall.call.tool,
+            arguments: parsedCall.call.args,
+            summary,
+          };
+          agentFinalText = [
+            `Propongo ejecutar \`${parsedCall.call.tool}\`:`,
+            summary,
+            '',
+            'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
+          ].join('\n');
+        } else {
+          const outcome = await executeAgentTool(parsedCall.call, { sessionId: agentSessionId });
+          toolCalls.push({
+            tool: outcome.tool,
+            args: parsedCall.call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          });
+
+          try {
+            const data = outcome.ok ? (outcome.data as any) : undefined;
+            await recordAgentToolCall({
+              chatId,
+              sessionId: agentSessionId,
+              agentKey: agentAuthorId ?? 'agent',
+              tool: outcome.tool,
+              args: parsedCall.call.args,
+              ok: outcome.ok,
+              error: outcome.ok ? undefined : outcome.error,
+              runId: typeof data?.runId === 'string' ? data.runId : undefined,
+              activityId: typeof data?.activityId === 'string' ? data.activityId : undefined,
+            });
+          } catch {
+            // La traza no debe romper la respuesta.
+          }
+
+          // Respuesta determinista: Venice no resume de forma fiable datos estructurados
+          // y mezcla estados de mensajes anteriores. La tool es la fuente de verdad.
+          agentFinalText = summarizeToolOutcome(outcome);
+        }
+      } else if (parsedCall.kind === 'invalid') {
+        agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;
+      } else {
+        agentFinalText = stripToolBlocks(result.text);
+      }
+    }
+
+    const turnMeta =
+      mode === 'agent'
+        ? buildTurnMeta({
+            tools: toolCalls.map((call) => ({
+              tool: call.tool,
+              ok: call.ok,
+              ...(call.error ? { error: call.error } : {}),
+            })),
+            proposal: pendingProposal !== null,
+            mock: wantsMock,
+          })
+        : null;
+
+    const parsed =
+      mode === 'agent'
+        ? { displayText: agentFinalText, architectPayload: null as Record<string, unknown> | null }
+        : parseAvrilAssistantReply(result.text);
+    const displayText = parsed.displayText;
+    const architectPayload = parsed.architectPayload;
 
     try {
-      await sendAgentMessage({ chatId, content: displayText, authorId: 'AvrilAgent' });
+      await sendAgentMessage({
+        chatId,
+        content: displayText,
+        authorId: agentAuthorId ?? 'AvrilAgent',
+        ...(turnMeta ? { meta: turnMeta } : {}),
+      });
     } catch (err) {
       return errorResponse(502, 'CONVEX_ERROR', 'Agent reply received but failed to persist.', {
         retryable: true,
@@ -463,7 +903,7 @@ export async function POST(req: Request) {
     }
 
     let ignitionReady = false;
-    if (architectPayload !== null) {
+    if (mode === 'architect' && architectPayload !== null) {
       const extracted = extractDraftFromArchitectPayload(architectPayload);
       if (extracted) {
         ignitionReady = extracted.nextStatus === 'ready';
@@ -485,7 +925,7 @@ export async function POST(req: Request) {
       }
     }
 
-    if (isFolderAgentBriefMessage(message)) {
+    if (mode === 'architect' && isFolderAgentBriefMessage(message)) {
       try {
         const organizationId = body.organizationId?.trim() || (await getDefaultOrganizationId());
         const capturedFromJson =
@@ -558,8 +998,14 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      mode,
+      chatId,
+      ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
+      ...(pendingProposal ? { requiresConfirmation: true, proposal: pendingProposal } : {}),
+      ...(turnMeta ? { meta: turnMeta } : {}),
       reply: displayText,
-      ...(architectPayload !== null ? { architectPayload } : {}),
+      ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),
     });
   } catch (err) {

@@ -27,3 +27,12 @@
 - Generator script: `script/startup-agent-generator.mjs`
 
 This layer exposes cross-agent wallet communication and identity posture in operational surfaces (`Home`, `Agents`, `Chats`, `Wallets`, `Profile`, `Startup Agent Generator`).
+
+## Agent conversations (S01)
+
+- Each Agent Office agent (`orchestrationAgents.agentKey` inside a session) owns a 1:1 thread in
+  `chats` (`kind='agent'`, `orchestrationSessionId`, `agentKey`); see `docs/S01_AGENT_IDENTITY_CHATS.md`.
+- `POST /api/chat/respond` has two explicit modes: `architect` (founder interview, unchanged) and
+  `agent` (agent persona from `src/modules/agents/`), resolved and verified server-side.
+- Agent threads are hidden from the founder chat list (`listChatsServer`), and are not the same
+  thing as the `agents` table (one worker per founder chat).

@@ -9,3 +9,16 @@ cache
 out
 broadcast
 .env*
+
+# Local harness artifacts / editor state
+.harness-runs/
+.cursor/
+
+# Python del worker para los arneses originales
+.harness-venv/
+__pycache__/
+*.pyc
+harness/original/*/crm/
+harness/original/*/crm_modelo/
+harness/original/*/output_marketing/
+harness/original/support/out/

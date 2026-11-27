@@ -7,6 +7,7 @@ import OfficeWorld2D from '@/src/components/office/OfficeWorld2D';
 import OfficeLegend from '@/src/components/office/OfficeLegend';
 import SessionTimeline from '@/src/components/office/SessionTimeline';
 import OfficeAgentChat from '@/src/components/office/OfficeAgentChat';
+import { AgentControlStatus, HandoffChainPanel, HarnessPanel } from '@/src/components/office/SwarmyPanels';
 import { Eyebrow } from '@/components/patterns/eyebrow';
 import { GlassPanel } from '@/components/patterns/glass-panel';
 import { SectionBackdrop } from '@/components/patterns/section-backdrop';
@@ -297,8 +298,6 @@ function OfficeSessionWorkspace({ sessionId }: { sessionId: string }) {
   const [showChat, setShowChat] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
 
-  const chatIdParam = useSearchParams().get('chatId')?.trim() || '';
-  const resolvedChatId = session?.chatId || chatIdParam;
   const authHeaders = useAuthHeaders();
 
   useEffect(() => {
@@ -374,7 +373,7 @@ useEffect(() => {
       setStatusMessage(data?.error?.message || `Failed to ${command} agent`);
       return;
     }
-    setStatusMessage(`${command} command sent to ${selectedAgent.name}`);
+    setStatusMessage(`Solicitud de ${command} enviada a ${selectedAgent.name}. Esperando confirmación del backend.`);
   }
 
   return (
@@ -402,6 +401,12 @@ useEffect(() => {
                 {session.status}
               </span>
             )}
+            <Link
+              href="/agents/swarmy"
+              className="rounded-full border border-border/70 bg-surface/60 px-3 py-1 text-xs font-heading text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Runs
+            </Link>
             <button
               type="button"
               onClick={() => setShowDebug((v) => !v)}
@@ -500,6 +505,7 @@ useEffect(() => {
                     <p className="text-sm font-heading font-semibold text-foreground">{selectedAgent.name}</p>
                     <p className="text-xs text-muted-foreground">Role · {selectedAgent.role || '—'}</p>
                     <p className="text-xs text-muted-foreground">Status · {selectedAgent.status}</p>
+                    <AgentControlStatus events={events} agentKey={selectedAgent.agentKey} />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <MarketingBrandButton
@@ -518,22 +524,22 @@ useEffect(() => {
                 </div>
               )}
             </GlassPanel>
-
-           {resolvedChatId && (
-              <div className="shrink-0">
-                <OfficeAgentChat
-                  agents={agents.map((a) => ({
-                    agentKey: a.agentKey,
-                    name: a.name,
-                    role: a.role,
-                    status: a.status,
-                  }))}
-                  chatId={resolvedChatId}
-                  selectedAgentKey={selectedAgentKey}
-                  onSelectAgent={setSelectedAgentKey}
-                />
-              </div>
-            )}
+            
+           <HandoffChainPanel events={events} />
+           <HarnessPanel agents={agents} />
+           <div className="shrink-0">
+             <OfficeAgentChat
+               agents={agents.map((a) => ({
+                 agentKey: a.agentKey,
+                 name: a.name,
+                 role: a.role,
+                 status: a.status,
+               }))}
+               sessionId={sessionId}
+               selectedAgentKey={selectedAgentKey}
+               onSelectAgent={setSelectedAgentKey}
+             />
+           </div>
 
             
           </div>

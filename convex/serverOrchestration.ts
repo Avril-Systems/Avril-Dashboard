@@ -2,6 +2,8 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireEntity } from './lib/authz';
 import { deriveCompanyDisplayName, isPlaceholderChatTitle } from './lib/companyDisplayName';
+import { getActivityDef, isActivityForHarness, isHarnessType } from './lib/harnessActivities';
+
 
 const SERVER_SECRET_ENV = 'CONVEX_SERVER_SECRET';
 
@@ -409,5 +411,588 @@ export const healSessionDisplayNamesServer = mutation({
     }
 
     return { healed, scanned: sessions.length };
+  },
+});
+
+  // --- Mutación autenticada para Ingestión de Eventos (S00 / W46) ---
+export const ingestEvent = mutation({
+  args: {
+    serverSecret: v.string(),
+    version: v.string(),
+    tenantId: v.string(),
+    workspaceId: v.string(),
+    runId: v.string(),
+    eventType: v.union(
+      v.literal("tool.call.completed"),
+      v.literal("support.report.received"),
+      v.literal("handoff.created"),
+      v.literal("handoff.ack"),
+      v.literal("diagnosis.ready"),
+      v.literal("patch.proposed"),
+      v.literal("approval.decided"),
+      v.literal("run.result"),
+      v.literal("run.pause"),
+      v.literal("run.pause.confirmed"),
+      v.literal("error.reported"),
+      v.literal("agent.command.sent"),
+      v.literal("agent.status"),
+      v.literal("agent.paused"),
+      v.literal("agent.stopped"),
+      v.literal("activity.assigned"),
+      v.literal("activity.started"),
+      v.literal("activity.completed"),
+      v.literal("activity.failed"),
+      v.literal("activity.blocked"),
+      v.literal("prospecto.verificado")
+    ),
+    payload: v.any(),
+    idempotencyKey: v.string(),
+
+    // Trazabilidad de código y DeepSeek
+    repository: v.optional(v.string()),
+    branch: v.optional(v.string()),
+    allowedRoutes: v.optional(v.array(v.string())),
+    patchRef: v.optional(v.string()),
+    testResultRef: v.optional(v.string()),
+    prRef: v.optional(v.string()),
+    humanApprovalRequired: v.boolean(),
+  },
+
+
+  
+  handler: async (ctx, args) => {
+    // 1. Denegar acceso anónimo o secreto inválido
+    requireServerSecret(args.serverSecret);
+
+    if (args.eventType === "tool.call.completed") {
+  const requiredFields = [
+    "extension",
+    "harnessType",
+    "tool",
+    "requestId",
+    "httpStatus",
+    "responseHash",
+    "credentialRef",
+    "isMock",
+    "sandbox",
+  ];
+  const payloadObj = (args.payload ?? {}) as Record<string, unknown>;
+  for (const field of requiredFields) {
+    if (payloadObj[field] === undefined || payloadObj[field] === null) {
+      throw new Error(`Payload inválido para tool.call.completed: falta '${field}'.`);
+    }
+  }
+}
+    // 2. Verificación de Idempotencia POR TENANT
+    const existingEvent = await ctx.db
+      .query("orchestratorEvents")
+      .withIndex("by_tenant_idempotency", (q) =>
+        q.eq("tenantId", args.tenantId).eq("idempotencyKey", args.idempotencyKey)
+      )
+      .first();
+
+    if (existingEvent) {
+      return {
+        status: "idempotent_hit" as const,
+        eventId: existingEvent._id,
+        message: "Evento ignorado: Ya fue registrado previamente para este tenant.",
+      };
+    }
+
+    // 3. Extraemos serverSecret para NO persistirlo nunca en la base de datos
+    const { serverSecret: _secret, ...eventData } = args;
+    const timestamp = Date.now();
+
+    const eventId = await ctx.db.insert("orchestratorEvents", {
+      ...eventData,
+      ack: true,
+      timestamp,
+    });
+
+    return {
+      status: "success" as const,
+      eventId,
+    };
+  },
+});
+
+// Consulta autenticada por tenant y runId (formato compatible con EventItem de Kevin)
+export const getEventsByRun = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    runId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const events = await ctx.db
+      .query("orchestratorEvents")
+      .withIndex("by_tenant_run", (q) =>
+        q.eq("tenantId", args.tenantId).eq("runId", args.runId)
+      )
+      .collect();
+
+    return events
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((ev) => ({
+        _id: ev._id,
+        type: ev.eventType,
+        createdAt: new Date(ev.timestamp).toISOString(),
+        payload: ev.payload,
+        runId: ev.runId,
+        version: ev.version,
+        patchRef: ev.patchRef,
+        prRef: ev.prRef,
+      }));
+  },
+});
+
+// Consulta autenticada de eventos recientes por tenant (para refresh del Dashboard)
+export const listEventsByTenant = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const take = Math.max(1, Math.min(args.limit ?? 100, 500));
+    const events = await ctx.db
+      .query("orchestratorEvents")
+      .withIndex("by_tenant_time", (q) => q.eq("tenantId", args.tenantId))
+      .order("desc")
+      .take(take);
+
+    return events.reverse().map((ev) => ({
+      _id: ev._id,
+      type: ev.eventType,
+      createdAt: new Date(ev.timestamp).toISOString(),
+      payload: ev.payload,
+      runId: ev.runId,
+      version: ev.version,
+      patchRef: ev.patchRef,
+      prRef: ev.prRef,
+    }));
+  },
+});
+
+// Mutación autenticada para registrar latidos (Heartbeats) por tenant
+export const pingConnection = mutation({
+  args: {
+    serverSecret: v.string(),
+    connectionId: v.string(),
+    tenantId: v.string(),
+    harnessType: v.optional(v.string()),
+    executing: v.optional(v.boolean()),
+    isMock: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const existing = await ctx.db
+      .query("orchestratorConnections")
+      .withIndex("by_tenant_connection", (q) =>
+        q.eq("tenantId", args.tenantId).eq("connectionId", args.connectionId)
+      )
+      .first();
+
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        lastHeartbeat: now,
+        ...(args.harnessType !== undefined ? { harnessType: args.harnessType } : {}),
+        ...(args.executing !== undefined ? { executing: args.executing } : {}),
+        ...(args.isMock !== undefined ? { isMock: args.isMock } : {}),
+      });
+      return existing._id;
+    }
+
+    const { serverSecret: _secret, ...connData } = args;
+    return await ctx.db.insert("orchestratorConnections", {
+      ...connData,
+      lastHeartbeat: now,
+    });
+  },
+});
+
+// Query autenticada y aislada por tenant (alineada con HEARTBEAT_STALE_MS = 60000 de Kevin)
+export const getActiveConnections = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+
+    const now = Date.now();
+    const HEARTBEAT_TTL_MS = 60_000;
+
+    const connections = await ctx.db
+      .query("orchestratorConnections")
+      .withIndex("by_tenant_connection", (q) => q.eq("tenantId", args.tenantId))
+      .collect();
+
+    return connections.map((conn) => {
+      const isConnected = now - conn.lastHeartbeat <= HEARTBEAT_TTL_MS;
+      const harnessType = conn.harnessType ?? conn.connectionId;
+
+      return {
+        _id: conn._id,
+        agentKey: conn.connectionId,
+        name: harnessType,
+        status: isConnected ? "online" : "stale",
+        lastHeartbeatAt: conn.lastHeartbeat,
+        meta: {
+          harnessType,
+          connected: isConnected,
+          executing: isConnected ? (conn.executing ?? false) : false,
+          lastHeartbeatAt: conn.lastHeartbeat,
+          isMock: conn.isMock ?? false,
+        },
+      };
+    });
+  },
+});
+// ============================================================================
+// Actividades por arnés (Dashboard -> cola durable -> worker real -> resultado)
+// ============================================================================
+
+const harnessActivityStatusValidator = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("completed"),
+  v.literal("failed"),
+  v.literal("blocked"),
+  v.literal("cancelled")
+);
+
+const MAX_ACTIVITY_INPUT_BYTES = 32_000;
+const MAX_ACTIVITY_RESULT_BYTES = 300_000;
+
+function requireSafeId(value: string, field: string) {
+  if (!value || value.length > 128 || !/^[A-Za-z0-9_.:-]+$/.test(value)) {
+    throw new Error(`Identificador inválido para ${field}.`);
+  }
+}
+
+function activityEventId(activityId: string, suffix: string) {
+  return `activity_${activityId}_${suffix}`;
+}
+
+function resultSummaryOf(result: unknown) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return undefined;
+  return (result as Record<string, unknown>).summary;
+}
+
+/** Devuelve solo lo que la UI necesita; el resultado completo se pide aparte. */
+function publicActivity(
+  row: {
+    activityId: string;
+    runId: string;
+    harnessType: string;
+    activity: string;
+    title: string;
+    input?: unknown;
+    status: string;
+    result?: unknown;
+    error?: string;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    startedAt?: string;
+    finishedAt?: string;
+  },
+  includeResult: boolean
+) {
+  const result = row.result;
+  return {
+    activityId: row.activityId,
+    runId: row.runId,
+    harnessType: row.harnessType,
+    activity: row.activity,
+    title: row.title,
+    input: row.input,
+    status: row.status,
+    summary: resultSummaryOf(result),
+    ...(includeResult
+      ? {
+          result:
+            result && typeof result === "object" && !Array.isArray(result)
+              ? result
+              : result ?? undefined,
+        }
+      : {}),
+    error: row.error,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+  };
+}
+
+/** Asigna una actividad a un arnés. Crea el run y el evento activity.assigned en la misma mutación. */
+export const assignHarnessActivity = mutation({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    workspaceId: v.string(),
+    harnessType: v.string(),
+    activity: v.string(),
+    title: v.optional(v.string()),
+    input: v.optional(v.any()),
+    createdBy: v.optional(v.string()),
+    runId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    requireSafeId(args.workspaceId, "workspaceId");
+    if (!isHarnessType(args.harnessType) || !isActivityForHarness(args.harnessType, args.activity)) {
+      throw new Error("Arnés o actividad no válidos.");
+    }
+
+    const inputJson = JSON.stringify(args.input ?? {});
+    if (inputJson && inputJson.length > MAX_ACTIVITY_INPUT_BYTES) {
+      throw new Error("El input de la actividad es demasiado grande.");
+    }
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const activityId = `act_${now.toString(36)}_${suffix}`;
+    const runId = args.runId?.trim() || `run_${args.harnessType}_${now.toString(36)}_${suffix}`;
+    requireSafeId(runId, "runId");
+
+    const def = getActivityDef(args.harnessType, args.activity);
+    const title = (args.title?.trim() || def.defaultTitle).slice(0, 120);
+    const createdBy = (args.createdBy?.trim() || "dashboard").slice(0, 80);
+
+    await ctx.db.insert("harnessActivities", {
+      tenantId: args.tenantId,
+      workspaceId: args.workspaceId,
+      activityId,
+      runId,
+      harnessType: args.harnessType,
+      activity: args.activity,
+      title,
+      input: args.input ?? {},
+      status: "queued",
+      createdBy,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+
+    await ctx.db.insert("orchestratorEvents", {
+      version: "v1.0",
+      tenantId: args.tenantId,
+      workspaceId: args.workspaceId,
+      runId,
+      eventType: "activity.assigned",
+      payload: {
+        activityId,
+        harnessType: args.harnessType,
+        activity: args.activity,
+        title,
+        input: args.input ?? {},
+        isMock: false,
+      },
+      ack: true,
+      idempotencyKey: activityEventId(activityId, "assigned"),
+      timestamp: now,
+      humanApprovalRequired: false,
+    });
+
+    return { activityId, runId, status: "queued" as const };
+  },
+});
+
+/**
+ * Reclama la siguiente actividad en cola para un arnés. Es la operación atómica que usa el worker:
+ * si dos workers compiten, Convex serializa y solo uno obtiene `claimed`.
+ */
+export const claimNextHarnessActivity = mutation({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    harnessType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    if (!isHarnessType(args.harnessType)) throw new Error("Arnés no válido.");
+
+    const next = await ctx.db
+      .query("harnessActivities")
+      .withIndex("by_tenant_harness_status", (q) =>
+        q.eq("tenantId", args.tenantId).eq("harnessType", args.harnessType).eq("status", "queued")
+      )
+      .order("asc")
+      .first();
+    if (!next) return null;
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    await ctx.db.patch(next._id, {
+      status: "running",
+      startedAt: nowIso,
+      updatedAt: nowIso,
+    });
+
+    await ctx.db.insert("orchestratorEvents", {
+      version: "v1.0",
+      tenantId: next.tenantId,
+      workspaceId: next.workspaceId,
+      runId: next.runId,
+      eventType: "activity.started",
+      payload: {
+        activityId: next.activityId,
+        harnessType: next.harnessType,
+        activity: next.activity,
+        isMock: false,
+      },
+      ack: true,
+      idempotencyKey: activityEventId(next.activityId, "started"),
+      timestamp: now,
+      humanApprovalRequired: false,
+    });
+
+    return publicActivity({ ...next, status: "running", startedAt: nowIso, updatedAt: nowIso }, false);
+  },
+});
+
+/** Cierra una actividad reclamada. `blocked` se usa cuando falta un recurso/adaptador, nunca como éxito. */
+export const completeHarnessActivity = mutation({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    activityId: v.string(),
+    status: v.union(v.literal("completed"), v.literal("failed"), v.literal("blocked")),
+    result: v.optional(v.any()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    requireSafeId(args.activityId, "activityId");
+
+    const row = await ctx.db
+      .query("harnessActivities")
+      .withIndex("by_tenant_activity", (q) => q.eq("tenantId", args.tenantId).eq("activityId", args.activityId))
+      .first();
+    if (!row) throw new Error("Actividad no encontrada.");
+    if (row.status !== "running") {
+      throw new Error(`La actividad está en estado '${row.status}', no se puede cerrar.`);
+    }
+
+    const resultJson = JSON.stringify(args.result ?? null);
+    if (resultJson && resultJson.length > MAX_ACTIVITY_RESULT_BYTES) {
+      throw new Error("El resultado de la actividad es demasiado grande.");
+    }
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const error = args.error?.trim() ? args.error.trim().slice(0, 2000) : undefined;
+
+    await ctx.db.patch(row._id, {
+      status: args.status,
+      ...(args.result !== undefined ? { result: args.result } : {}),
+      ...(error ? { error } : {}),
+      updatedAt: nowIso,
+      finishedAt: nowIso,
+    });
+
+    const eventType =
+      args.status === "completed" ? "activity.completed" : args.status === "blocked" ? "activity.blocked" : "activity.failed";
+
+    await ctx.db.insert("orchestratorEvents", {
+      version: "v1.0",
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      runId: row.runId,
+      eventType,
+      payload: {
+        activityId: row.activityId,
+        harnessType: row.harnessType,
+        activity: row.activity,
+        status: args.status,
+        summary: resultSummaryOf(args.result),
+        error,
+        isMock: false,
+      },
+      ack: true,
+      idempotencyKey: activityEventId(row.activityId, args.status),
+      timestamp: now,
+      humanApprovalRequired: false,
+    });
+
+    return { ok: true as const, activityId: row.activityId, status: args.status };
+  },
+});
+
+/** Lista actividades del tenant. Por defecto sin `result` completo para no inflar el sondeo. */
+export const listHarnessActivities = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    runId: v.optional(v.string()),
+    harnessType: v.optional(v.string()),
+    status: v.optional(harnessActivityStatusValidator),
+    includeResult: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    const take = Math.max(1, Math.min(args.limit ?? 50, 200));
+
+    let rows;
+    if (args.runId) {
+      requireSafeId(args.runId, "runId");
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_run", (q) => q.eq("tenantId", args.tenantId).eq("runId", args.runId as string))
+        .collect();
+    } else if (args.status) {
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_status", (q) => q.eq("tenantId", args.tenantId).eq("status", args.status as "queued"))
+        .order("desc")
+        .take(take);
+    } else {
+      rows = await ctx.db
+        .query("harnessActivities")
+        .withIndex("by_tenant_createdAt", (q) => q.eq("tenantId", args.tenantId))
+        .order("desc")
+        .take(take);
+    }
+
+    return rows
+      .filter((row) => (args.harnessType ? row.harnessType === args.harnessType : true))
+      .filter((row) => (args.status ? row.status === args.status : true))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+      .slice(0, take)
+      .map((row) => publicActivity(row, args.includeResult === true));
+  },
+});
+
+/** Resultado completo de una actividad (para el detalle del run). */
+export const getHarnessActivity = query({
+  args: {
+    serverSecret: v.string(),
+    tenantId: v.string(),
+    activityId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    requireServerSecret(args.serverSecret);
+    requireSafeId(args.tenantId, "tenantId");
+    requireSafeId(args.activityId, "activityId");
+    const row = await ctx.db
+      .query("harnessActivities")
+      .withIndex("by_tenant_activity", (q) => q.eq("tenantId", args.tenantId).eq("activityId", args.activityId))
+      .first();
+    return row ? publicActivity(row, true) : null;
   },
 });

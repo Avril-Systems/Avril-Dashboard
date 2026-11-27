@@ -225,15 +225,10 @@ export const copy = {
       dashboard: {
         title: 'Your AI-operated company is live.',
         subtitle:
-          'Track active agents, pending decisions, health score, revenue signals, and suggested skills.',
-        cta: 'Open operator dashboard',
+          'Your session is ready. Open Agent Office to talk to each agent; real execution and run status live in Runs.',
+        cta: 'Open Agent Office',
+        runsCta: 'View runs (Swarmy)',
         restart: 'Start another company',
-        stats: {
-          agents: 'Active agents',
-          approvals: 'Pending approvals',
-          health: 'Health score',
-          revenue: 'Revenue signals',
-        },
       },
       creating: {
         title: 'Your AI-operated company is being created.',
@@ -483,15 +478,10 @@ export const copy = {
       dashboard: {
         title: 'Tu empresa operada por IA está activa.',
         subtitle:
-          'Revisa agentes activos, decisiones pendientes, health score, señales de ingreso y skills sugeridas.',
-        cta: 'Abrir dashboard operativo',
+          'Tu sesión está lista. Abre Agent Office para hablar con cada agente; la ejecución real y el estado de los runs están en Runs.',
+        cta: 'Abrir Agent Office',
+        runsCta: 'Ver runs (Swarmy)',
         restart: 'Iniciar otra empresa',
-        stats: {
-          agents: 'Agentes activos',
-          approvals: 'Decisiones pendientes',
-          health: 'Health score',
-          revenue: 'Señales de ingreso',
-        },
       },
       creating: {
         title: 'Tu empresa operada por IA se está creando.',

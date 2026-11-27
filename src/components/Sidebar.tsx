@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import {
+  Activity,
   Building2,
   Cpu,
   Home,
@@ -23,6 +24,7 @@ const NAV_BASE: Array<{
   { href: '/home', label: 'Home', color: 'cyan', icon: <Home className="w-5 h-5 text-white" /> },
   { href: '/profile', label: 'Profile', color: 'cyan', icon: <UserRound className="w-5 h-5 text-white" /> },
   { href: '/agents/office', label: 'Office', color: 'cyan', icon: <Building2 className="w-5 h-5 text-white" /> },
+  { href: '/agents/swarmy', label: 'Runs', color: 'cyan', icon: <Activity className="w-5 h-5 text-white" /> },
   { href: '/chats', label: 'Chats', color: 'cyan', icon: <MessageSquare className="w-5 h-5 text-white" /> },
   { href: '/wallets', label: 'Wallets', color: 'cyan', icon: <Wallet className="w-5 h-5 text-white" /> },
   { href: '/startup-agent-generator', label: 'Generator', color: 'cyan', icon: <Cpu className="w-5 h-5 text-white" /> },
@@ -35,9 +37,6 @@ const NAV_BASE: Array<{
 ];
 
 function isNavActive(pathname: string, href: string) {
-  if (href === '/agents') {
-    return pathname.startsWith('/agents') && !pathname.startsWith('/agents/office');
-  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

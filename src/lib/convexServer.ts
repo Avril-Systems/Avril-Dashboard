@@ -123,6 +123,8 @@ export async function sendAgentMessage(args: {
   chatId: string;
   content: string;
   authorId?: string;
+  /** Metacognición del turno (S06): fuentes, confianza, límites. */
+  meta?: unknown;
 }) {
   const client = getClient();
   const serverSecret = requireServerSecret();
@@ -131,6 +133,7 @@ export async function sendAgentMessage(args: {
     chatId: args.chatId,
     content: args.content,
     authorId: args.authorId ?? 'AvrilAgent',
+    ...(args.meta !== undefined ? { meta: args.meta } : {}),
     serverSecret,
   });
 }
@@ -306,6 +309,95 @@ export async function listOrchestrationSessions(args?: { organizationId?: string
     limit: args?.limit,
     serverSecret,
   });
+}
+
+/** Identidad canónica de un agente de orquestación (la dueña de su conversación). */
+export type AgentChatAgent = {
+  agentKey: string;
+  name: string;
+  role: string | null;
+  meta: unknown;
+};
+
+/** Chat 1:1 existente de un agente (o null). */
+export async function getAgentChat(args: {
+  sessionId: string;
+  agentKey: string;
+}): Promise<{ chatId: string | null; agent: AgentChatAgent } | null> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).query('serverAgentChats:getAgentChatServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  });
+}
+
+/** Chat 1:1 del agente, creándolo si es la primera vez. */
+export async function getOrCreateAgentChat(args: {
+  sessionId: string;
+  agentKey: string;
+}): Promise<{ chatId: string; agent: AgentChatAgent }> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:getOrCreateAgentChatServer', {
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    serverSecret,
+  });
+}
+
+/** Traza persistida de tools del orquestador (S03). */
+export type AgentToolCallRow = {
+  _id: string;
+  tool: string;
+  args: unknown;
+  ok: boolean;
+  error: string | null;
+  runId: string | null;
+  activityId: string | null;
+  createdAt: string;
+};
+
+export async function recordAgentToolCall(args: {
+  chatId: string;
+  sessionId: string;
+  agentKey: string;
+  tool: string;
+  args: unknown;
+  ok: boolean;
+  error?: string;
+  runId?: string;
+  activityId?: string;
+}): Promise<string> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  return await (client as any).mutation('serverAgentChats:recordAgentToolCallServer', {
+    chatId: args.chatId,
+    sessionId: args.sessionId,
+    agentKey: args.agentKey,
+    tool: args.tool,
+    args: args.args ?? {},
+    ok: args.ok,
+    error: args.error,
+    runId: args.runId,
+    activityId: args.activityId,
+    serverSecret,
+  });
+}
+
+export async function listAgentToolCalls(args: {
+  chatId: string;
+  limit?: number;
+}): Promise<AgentToolCallRow[]> {
+  const client = getClient();
+  const serverSecret = requireServerSecret();
+  const rows = (await (client as any).query('serverAgentChats:listAgentToolCallsServer', {
+    chatId: args.chatId,
+    limit: args.limit ?? 20,
+    serverSecret,
+  })) as AgentToolCallRow[];
+  return Array.isArray(rows) ? rows : [];
 }
 
 export async function getControlPlaneState(args: { organizationId?: string }) {

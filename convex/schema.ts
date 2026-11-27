@@ -223,10 +223,30 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
     agentId: v.optional(v.id('agents')),
+    /**
+     * 'architect' = entrevista de founder con Avril (legacy: undefined).
+     * 'agent' = conversación 1:1 con un agente del Agent Office.
+     */
+    kind: v.optional(v.union(v.literal('architect'), v.literal('agent'))),
+    /** Solo en kind='agent': sesión de orquestación y agentKey dueños de esta conversación. */
+    orchestrationSessionId: v.optional(v.id('orchestrationSessions')),
+    agentKey: v.optional(v.string()),
     summary: v.optional(v.string()),
     summaryUpdatedAt: v.optional(v.string()),
-  }).index('by_org', ['organizationId']).index('by_updatedAt', ['updatedAt']).index('by_agent', ['agentId']),
-  messages: defineTable({ chatId: v.id('chats'), authorType: v.union(v.literal('human'), v.literal('agent')), authorId: v.string(), content: v.string(), createdAt: v.string() }).index('by_chat', ['chatId']),
+  })
+    .index('by_org', ['organizationId'])
+    .index('by_updatedAt', ['updatedAt'])
+    .index('by_agent', ['agentId'])
+    .index('by_session_agent', ['orchestrationSessionId', 'agentKey']),
+  messages: defineTable({
+    chatId: v.id('chats'),
+    authorType: v.union(v.literal('human'), v.literal('agent')),
+    authorId: v.string(),
+    content: v.string(),
+    /** Metacognición del turno (S06): fuentes, confianza, límites. Solo en respuestas de agente. */
+    meta: v.optional(v.any()),
+    createdAt: v.string(),
+  }).index('by_chat', ['chatId']),
   /** Latest Avril chat → ignition export for this thread (full demo path). */
   chatIgnitionDrafts: defineTable({
     organizationId: v.id('organizations'),
@@ -241,6 +261,24 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
   }).index('by_chat', ['chatId']),
+  /**
+   * Traza persistida de las tools del orquestador (S03): qué consultó/ejecutó,
+   * resultado y a qué run/actividad apuntó. Sobrevive a recargas y es auditable.
+   */
+  agentToolCalls: defineTable({
+    chatId: v.id('chats'),
+    sessionId: v.id('orchestrationSessions'),
+    agentKey: v.string(),
+    tool: v.string(),
+    args: v.any(),
+    ok: v.boolean(),
+    error: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    activityId: v.optional(v.string()),
+    createdAt: v.string(),
+  })
+    .index('by_chat', ['chatId'])
+    .index('by_session', ['sessionId']),
   wallets: defineTable({ organizationId: v.id('organizations'), ownerUserId: v.id('users'), provider: v.string(), address: v.string(), createdAt: v.string() }).index('by_org', ['organizationId']),
   walletPermissions: defineTable({ walletId: v.id('wallets'), memberUserId: v.id('users'), permission: v.union(v.literal('view'), v.literal('propose'), v.literal('execute'), v.literal('approve')), createdAt: v.string() }).index('by_wallet_user', ['walletId', 'memberUserId']),
   approvals: defineTable({
@@ -255,5 +293,104 @@ export default defineSchema({
     decisionAt: v.optional(v.string()),
     createdAt: v.string(),
   }).index('by_org_status', ['organizationId', 'status']),
-  auditLogs: defineTable({ organizationId: v.id('organizations'), actorUserId: v.optional(v.id('users')), action: v.string(), resourceType: v.string(), resourceId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.string() }).index('by_org_time', ['organizationId', 'createdAt'])
+  auditLogs: defineTable({ organizationId: v.id('organizations'), actorUserId: v.optional(v.id('users')), action: v.string(), resourceType: v.string(), resourceId: v.optional(v.string()), metadata: v.optional(v.any()), createdAt: v.string() }).index('by_org_time', ['organizationId', 'createdAt']),
+
+/// Contrato versionado de eventos del orquestador (S00 / W46) - Alejandro y Kevin
+  orchestratorEvents: defineTable({
+    version: v.string(), // ej. "v1.0"
+    tenantId: v.string(), // Aislamiento estricto por cliente
+    workspaceId: v.string(),
+    runId: v.string(),
+
+    eventType: v.union(
+      v.literal("tool.call.completed"),
+      v.literal("support.report.received"),
+      v.literal("handoff.created"),
+      v.literal("handoff.ack"),
+      v.literal("diagnosis.ready"),
+      v.literal("patch.proposed"),
+      v.literal("approval.decided"),
+      v.literal("run.result"),
+      v.literal("run.pause"),
+      v.literal("run.pause.confirmed"),
+      v.literal("error.reported"),
+      v.literal("agent.command.sent"),
+      v.literal("agent.status"),
+      v.literal("agent.paused"),
+      v.literal("agent.stopped"),
+      // Actividades asignadas desde el Dashboard a los 4 arneses.
+      v.literal("activity.assigned"),
+      v.literal("activity.started"),
+      v.literal("activity.completed"),
+      v.literal("activity.failed"),
+      v.literal("activity.blocked"),
+      // Resultado real del arnés de prospección (reutiliza el trabajo previo).
+      v.literal("prospecto.verificado")
+    ),
+
+    payload: v.any(),
+
+    // Trazabilidad y resiliencia
+    ack: v.boolean(),
+    idempotencyKey: v.string(),
+    timestamp: v.number(),
+
+    // Soporte DeepSeek y trazabilidad de código
+    repository: v.optional(v.string()),
+    branch: v.optional(v.string()),
+    allowedRoutes: v.optional(v.array(v.string())),
+    patchRef: v.optional(v.string()),
+    testResultRef: v.optional(v.string()),
+    prRef: v.optional(v.string()),
+
+    // Validaciones Human-in-the-loop
+    humanApprovalRequired: v.boolean(),
+    humanApproved: v.optional(v.boolean()),
+  })
+    .index("by_tenant_run", ["tenantId", "runId"])
+    .index("by_tenant_time", ["tenantId", "timestamp"])
+    .index("by_tenant_idempotency", ["tenantId", "idempotencyKey"]),
+
+  // Registro de conexiones activas sin procesos permanentes (Heartbeats por tenant)
+  orchestratorConnections: defineTable({
+    connectionId: v.string(),
+    tenantId: v.string(),
+    harnessType: v.optional(v.string()), // 'support' | 'b2b' | 'prospecting' | 'marketing'
+    executing: v.optional(v.boolean()),
+    isMock: v.optional(v.boolean()),
+    lastHeartbeat: v.number(),
+  }).index("by_tenant_connection", ["tenantId", "connectionId"]),
+
+  // Actividades asignadas desde el Dashboard y ejecutadas por el worker de arneses.
+  // Es la cola durable: una actividad solo pasa a running cuando un worker la reclama.
+  harnessActivities: defineTable({
+    tenantId: v.string(),
+    workspaceId: v.string(),
+    activityId: v.string(),
+    runId: v.string(),
+    harnessType: v.string(), // 'support' | 'b2b' | 'prospecting' | 'marketing'
+    activity: v.string(), // clave del catálogo (convex/lib/harnessActivities.ts)
+    title: v.string(),
+    input: v.optional(v.any()),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("blocked"),
+      v.literal("cancelled")
+    ),
+    result: v.optional(v.any()),
+    error: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    startedAt: v.optional(v.string()),
+    finishedAt: v.optional(v.string()),
+  })
+    .index("by_tenant_activity", ["tenantId", "activityId"])
+    .index("by_tenant_status", ["tenantId", "status"])
+    .index("by_tenant_harness_status", ["tenantId", "harnessType", "status"])
+    .index("by_tenant_run", ["tenantId", "runId"])
+    .index("by_tenant_createdAt", ["tenantId", "createdAt"]),
 });

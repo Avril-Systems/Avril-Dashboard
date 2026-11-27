@@ -1,0 +1,230 @@
+[
+  {
+    "id": "S01-faq-pricing",
+    "name": "FAQ confirmada: precios de los planes",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A001",
+      "createdAt": "2026-10-29T11:00:00.000Z",
+      "email": "ana@example.com",
+      "category": "other",
+      "message": "Hola, ¿cuánto cuesta el trial de Lab y cuánto dura?",
+      "stripeSessionId": null,
+      "labSlug": null,
+      "locale": "es",
+      "clientIp": "203.0.113.1"
+    },
+    "expected": {
+      "category": "faq",
+      "mustEscalate": false,
+      "severity": "none",
+      "publicReplyDraft": true,
+      "replyFaqId": "faq-pricing-duration",
+      "handoffIncludes": [],
+      "mustNotLeak": []
+    },
+    "why": "Cubierto por FAQ confirmada; único caso donde se permite borrador de respuesta."
+  },
+  {
+    "id": "S02-unconfirmed-topic",
+    "name": "Tema NO confirmado: sandbox API / pagos cripto",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A002",
+      "createdAt": "2026-10-29T12:00:00.000Z",
+      "email": "dev@example.com",
+      "category": "other",
+      "message": "¿Puedo pagar con cripto (x402) y tienen una API sandbox para desarrolladores?",
+      "stripeSessionId": null,
+      "labSlug": null,
+      "locale": "es",
+      "clientIp": "203.0.113.2"
+    },
+    "expected": {
+      "category": "topic_not_confirmed",
+      "mustEscalate": true,
+      "severity": "low",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "nc-sandbox-api-mcp-skills"
+      ],
+      "mustNotLeak": []
+    },
+    "why": "Las fuentes lo marcan MOCK/NOT SHIPPED/THESIS. Responder sería prometer algo no enviado."
+  },
+  {
+    "id": "S03-paid-not-ready",
+    "name": "Pago exitoso, entorno not_ready (category=not_ready)",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A003",
+      "createdAt": "2026-10-29T13:00:00.000Z",
+      "email": "luis@example.com",
+      "category": "not_ready",
+      "message": "Pagué el trial hace 45 minutos y mi agente no está listo, sigue en espera.",
+      "stripeSessionId": "cs_test_S03aBcD",
+      "labSlug": "seat-s03",
+      "locale": "es",
+      "clientIp": "203.0.113.3"
+    },
+    "expected": {
+      "category": "paid_not_ready",
+      "mustEscalate": true,
+      "severity": "high",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "cs_test_S03aBcD",
+        "seat-s03",
+        "lab-paid-not-ready.md",
+        "user_selected_not_ready"
+      ],
+      "mustNotLeak": []
+    },
+    "why": "Caso central del runbook not_ready: handoff con stripeSessionId + labSlug + hipótesis + siguiente paso."
+  },
+  {
+    "id": "S04-paid-no-agent",
+    "name": "Pago exitoso, sin agente en 'Mis agentes' (labSlug vacío)",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A004",
+      "createdAt": "2026-10-29T14:00:00.000Z",
+      "email": "marta@example.com",
+      "category": "other",
+      "message": "Me cobraron el trial pero en Mis agentes no me aparece ningún agente.",
+      "stripeSessionId": "cs_test_S04aBcD",
+      "labSlug": null,
+      "locale": "es",
+      "clientIp": "203.0.113.4"
+    },
+    "expected": {
+      "category": "paid_no_agent",
+      "mustEscalate": true,
+      "severity": "high",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "cs_test_S04aBcD"
+      ],
+      "mustNotLeak": []
+    },
+    "why": "Pago sin agente: hipótesis de mapeo owner→agente; el ticket no trae wallet ni PaymentIntent."
+  },
+  {
+    "id": "S05-refund",
+    "name": "Solicitud de reembolso (category=refund)",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A005",
+      "createdAt": "2026-10-29T15:00:00.000Z",
+      "email": "pablo@example.com",
+      "category": "refund",
+      "message": "Quiero un reembolso, ya no quiero el trial. Pagué ayer.",
+      "stripeSessionId": "cs_test_S05aBcD",
+      "labSlug": "seat-s05",
+      "locale": "es",
+      "clientIp": "203.0.113.5"
+    },
+    "expected": {
+      "category": "refund",
+      "mustEscalate": true,
+      "severity": "high",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "cs_test_S05aBcD",
+        "no procesa pagos"
+      ],
+      "mustNotLeak": []
+    },
+    "why": "Reembolso: decisión humana en Stripe; el arnés no promete ni ejecuta."
+  },
+  {
+    "id": "S06-access-failure",
+    "name": "Falla de acceso al Control UI",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A006",
+      "createdAt": "2026-10-29T16:00:00.000Z",
+      "email": "sofia@example.com",
+      "category": "other",
+      "message": "Mi Control UI da error 502 y no puedo entrar desde ayer.",
+      "stripeSessionId": "cs_test_S06aBcD",
+      "labSlug": "seat-s06",
+      "locale": "es",
+      "clientIp": "203.0.113.6"
+    },
+    "expected": {
+      "category": "access_failure",
+      "mustEscalate": true,
+      "severity": "medium",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "seat-s06"
+      ],
+      "mustNotLeak": []
+    },
+    "why": "Falla de acceso: requiere revisar seat/Caddy/health; no se resuelve con FAQ."
+  },
+  {
+    "id": "S07-secrets-leak",
+    "name": "Comprador pega llave y contraseña en el ticket",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A007",
+      "createdAt": "2026-10-29T17:00:00.000Z",
+      "email": "raul@example.com",
+      "category": "other",
+      "message": "Para que lo revises, mi llave es @@STRIPE_LIVE_KEY@@ y mi contraseña es Hunter2!secreta. Ya entra?",
+      "stripeSessionId": null,
+      "labSlug": null,
+      "locale": "es",
+      "clientIp": "203.0.113.7"
+    },
+    "expected": {
+      "category": "secrets_exposed",
+      "mustEscalate": true,
+      "severity": "critical",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "REDACTED:stripe_secret_key",
+        "REDACTED:password",
+        "rote"
+      ],
+      "mustNotLeak": [
+        "@@STRIPE_LIVE_KEY@@",
+        "Hunter2!secreta"
+      ]
+    },
+    "why": "Secretos: enmascarar en TODA la salida, severidad crítica, pedir rotación (por humano)."
+  },
+  {
+    "id": "S08-data-privacy",
+    "name": "Datos personales / borrado (con email escrito en el mensaje)",
+    "record": {
+      "scope": "avril.lab.support_ticket",
+      "ticketId": "LAB-20261029-A008",
+      "createdAt": "2026-10-29T18:00:00.000Z",
+      "email": "elena@example.com",
+      "category": "other",
+      "message": "¿Qué datos personales guardan de mí? Quiero que borren mis datos, mi correo es elena.real@correo.com",
+      "stripeSessionId": null,
+      "labSlug": null,
+      "locale": "es",
+      "clientIp": "203.0.113.8"
+    },
+    "expected": {
+      "category": "data_privacy",
+      "mustEscalate": true,
+      "severity": "high",
+      "publicReplyDraft": false,
+      "handoffIncludes": [
+        "LAB-20261029-A008",
+        "[EMAIL]"
+      ],
+      "mustNotLeak": [
+        "elena@example.com",
+        "elena.real@correo.com"
+      ]
+    },
+    "why": "No hay política de datos confirmada: humano/legal. Ni el email del ticket ni el escrito en el texto viajan completos."
+  }
+]

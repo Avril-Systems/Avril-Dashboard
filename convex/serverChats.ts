@@ -76,7 +76,12 @@ export const listChatsServer = query({
       .withIndex('by_org', (q) => q.eq('organizationId', args.organizationId))
       .collect();
 
-    const sorted = chats.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50);
+    // Las conversaciones por agente (kind='agent') no son hilos del fundador:
+    // se leen solo desde Agent Office, no en el listado de /chats.
+    const sorted = chats
+      .filter((chat) => chat.kind !== 'agent')
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 50);
 
     const withLastMessage = await Promise.all(
       sorted.map(async (chat) => {
@@ -138,6 +143,7 @@ export const sendAgentMessageServer = mutation({
     chatId: v.id('chats'),
     content: v.string(),
     authorId: v.optional(v.string()),
+    meta: v.optional(v.any()),
     serverSecret: v.string(),
   },
   handler: async (ctx, args) => {
@@ -151,6 +157,7 @@ export const sendAgentMessageServer = mutation({
       authorType: 'agent',
       authorId: (args.authorId ?? 'AvrilAgent').trim() || 'AvrilAgent',
       content: args.content,
+      ...(args.meta !== undefined ? { meta: args.meta } : {}),
       createdAt: now,
     });
 
