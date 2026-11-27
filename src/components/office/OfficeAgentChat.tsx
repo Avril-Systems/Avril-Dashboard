@@ -109,6 +109,8 @@ export default function OfficeAgentChat({
   const [selectorOpen, setSelectorOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** Solo auto-scroll si el usuario está cerca del final; si sube a leer, no lo bajamos. */
+  const isAtBottomRef = useRef(true);
 
   const activeAgent = agents.find((a) => a.agentKey === selectedAgentKey) ?? agents[0] ?? null;
   const activeAgentKey = activeAgent?.agentKey ?? null;
@@ -228,12 +230,22 @@ export default function OfficeAgentChat({
   }, [messages, pending]);
 
   useEffect(() => {
+    if (!isAtBottomRef.current) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, pending, sending]);
 
   useEffect(() => {
+    isAtBottomRef.current = true;
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
     inputRef.current?.focus();
   }, [activeAgentKey]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isAtBottomRef.current = distanceFromBottom < 80;
+  };
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -507,7 +519,7 @@ export default function OfficeAgentChat({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {visibleMessages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="space-y-1 text-center">
