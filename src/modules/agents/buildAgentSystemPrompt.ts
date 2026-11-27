@@ -35,7 +35,9 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
   const { persona } = identity;
   const harnessLine = persona.harnessType
     ? `Arnés conectado: ${persona.label} (\`${persona.harnessType}\`).`
-    : 'Sin arnés conectado: eres el orquestador del run.';
+    : persona.kind === 'orchestrator'
+      ? 'Sin arnés conectado: eres el orquestador del run.'
+      : 'Sin arnés conectado: agente registrado sin rol de orquestador.';
 
   const sessionLines: string[] = [
     context.companyName ? `Empresa/sesión: ${context.companyName}.` : null,
@@ -94,15 +96,17 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
                 context.intentions.harness?.[persona.harnessType]?.trim() ||
                   'Sin definir; pídela al orquestador o propone una.',
               ]
-            : [
-                '',
-                'Intenciones particulares vigentes de los arneses:',
-                Object.keys(context.intentions.harness ?? {}).length
-                  ? Object.entries(context.intentions.harness ?? {})
-                      .map(([harness, body]) => `- ${harness}: ${body}`)
-                      .join('\n')
-                  : 'Sin definir.',
-              ]),
+            : persona.kind === 'orchestrator'
+              ? [
+                  '',
+                  'Intenciones particulares vigentes de los arneses:',
+                  Object.keys(context.intentions.harness ?? {}).length
+                    ? Object.entries(context.intentions.harness ?? {})
+                        .map(([harness, body]) => `- ${harness}: ${body}`)
+                        .join('\n')
+                    : 'Sin definir.',
+                ]
+              : ['', 'No tienes intención particular ni rol de orquestador.']),
         ]
       : []),
     ...(context.tools && context.tools.length
@@ -125,7 +129,9 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
     '- Si el pedido no corresponde a tu arnés, dilo y sugiere a quién derivarlo.',
     persona.harnessType
       ? '- Tu intención particular marca el rumbo; tienes libertad para decidir cómo cumplirla con tus herramientas. Si el usuario te pide cambiarla, emite el bloque `set_my_intention` (propuesta formal; requiere aprobación y no se aplica en el turno).'
-      : '- Cuando el usuario defina o cambie la intención general, usa `set_strategy` y deriva intenciones breves para los arneses; usa `set_harness_intention` para una particular concreta.',
+      : persona.kind === 'orchestrator'
+        ? '- Cuando el usuario defina o cambie la intención general, usa `set_strategy` y deriva intenciones breves para los arneses; usa `set_harness_intention` para una particular concreta.'
+        : '- No tienes tools de orquestador ni de arnés; conversa y deriva al operador cuando haga falta.',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
@@ -145,6 +151,7 @@ export function buildIntentionReminder(
   intentions: AgentPromptContext['intentions']
 ): string | null {
   if (!intentions) return null;
+  if (identity.persona.kind === 'generic') return null;
   const lines = ['Intenciones vigentes (prevalecen sobre el historial):'];
   lines.push(`General: ${intentions.strategic?.trim() || 'sin definir'}`);
   if (identity.persona.harnessType) {

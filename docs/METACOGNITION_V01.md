@@ -135,5 +135,6 @@ Requisitos mínimos del proceso worker (fuera de Next):
 
 Swarmy exige token de operador (`DASHBOARD_APP_TOKEN`) o una sesión cuyo wallet esté en
 `SWARMY_OPERATOR_WALLETS` (coma-separado). Sin allowlist, las sesiones reciben
-`403 OPERATOR_REQUIRED`; el token de automatización sigue funcionando. Un `agentKey` no
-registrado recibe `403 AGENT_NOT_AUTHORIZED` y no hereda tools de orquestador.
+`403 OPERATOR_REQUIRED`; el token de automatización sigue funcionando. Los agentes legacy
+registrados quedan como genéricos (conversan sin tools elevadas); un `agentKey` inexistente
+se rechaza en la resolución del chat (404) y no hereda tools de orquestador.

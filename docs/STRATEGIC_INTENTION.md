@@ -91,8 +91,12 @@ producción.
 
 ## Seguridad de identidad
 
-- Solo el orquestador explícito (`role=orchestrator`, `meta.orchestrator` o `swarm-strategy`) y los
-  arneses registrados están autorizados. Un `agentKey` desconocido se rechaza con
-  `AGENT_NOT_AUTHORIZED`; no hereda la persona ni las tools del orquestador.
+- Son orquestadores explícitos `swarm-strategy`, `swarm-growth`, `swarm-operations`, los roles
+  `orchestrator/orquestador/...` y `meta.orchestrator=true`.
+- Los arneses registrados conservan sus tools.
+- Cualquier otro agente **registrado** (legacy) queda como genérico: conversa, pero no recibe tools
+  de orquestador ni de arnés.
+- Un `agentKey` que no existe en la sesión se rechaza en la resolución del chat (404); no hereda
+  la persona ni las tools del orquestador.
 - La confirmación de la propuesta de intención de un arnés requiere el endpoint de confirmación
   del operador (token/sesión autorizada); el turno del arnés no puede confirmarla.

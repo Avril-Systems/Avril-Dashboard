@@ -7,22 +7,23 @@
  *   - su conversación 1:1 (ver `serverAgentChats` en Convex).
  *
  * Regla de honestidad: las capacidades salen del catálogo real de actividades
- * (`convex/lib/harnessActivities.ts`) que el worker puede ejecutar. Si el agente
- * no tiene arnés conocido, se resuelve como orquestador y NO se le atribuyen
- * herramientas que no existen.
+ * (`convex/lib/harnessActivities.ts`) que el worker puede ejecutar. Un agente
+ * registrado sin arnés ni rol de orquestador queda como genérico: puede conversar,
+ * pero NO recibe tools de orquestador. Un agentKey no registrado ni siquiera llega
+ * aquí: la resolución de chat responde 404.
  */
 import { HARNESS_CATALOG, HARNESS_TYPES, isHarnessType } from '@/convex/lib/harnessActivities';
 import type { HarnessType } from '@/convex/lib/harnessActivities';
 
 export type AgentMetaInput = { agentKey: string; name?: string | null; role?: string | null; meta?: unknown };
 
-export type AgentKind = 'orchestrator' | 'harness' | 'unknown';
+export type AgentKind = 'orchestrator' | 'harness' | 'generic';
 
 export type AgentPersona = {
-  /** Arnés real detrás del agente; null = sin arnés (orquestador o desconocido). */
+  /** Arnés real detrás del agente; null = sin arnés (orquestador o genérico). */
   harnessType: HarnessType | null;
   kind: AgentKind;
-  /** Solo orquestador/arnés registrados pueden actuar y usar tools. */
+  /** Identidad resuelta desde un registro existente; los genéricos no tienen tools elevadas. */
   authorized: boolean;
   label: string;
   mission: string;
@@ -94,7 +95,13 @@ const ORCHESTRATOR_ROLES = new Set([
   'manager',
   'coordination',
 ]);
-const ORCHESTRATOR_KEYS = new Set(['swarm-strategy', 'orchestrator', 'orquestador']);
+const ORCHESTRATOR_KEYS = new Set([
+  'swarm-strategy',
+  'swarm-growth',
+  'swarm-operations',
+  'orchestrator',
+  'orquestador',
+]);
 
 function metaString(meta: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
@@ -124,21 +131,22 @@ export function isOrchestratorAgent(input: { agentKey: string; role?: string | n
   );
 }
 
-const UNKNOWN_PERSONA: AgentPersona = {
+const GENERIC_PERSONA: AgentPersona = {
   harnessType: null,
-  kind: 'unknown',
-  authorized: false,
-  label: 'Agente no registrado',
+  kind: 'generic',
+  authorized: true,
+  label: 'Agente registrado',
   mission:
-    'Sin identidad autorizada en esta sesión. No puedes actuar como orquestador ni usar herramientas hasta que el operador registre tu rol.',
+    'Conversas dentro de esta sesión, pero no tienes rol de orquestador ni un arnés conectado. No puedes usar tools elevadas ni asignar actividades.',
   capabilities: [],
   boundaries: [
-    'No tienes permisos de orquestador.',
+    'No tienes permisos de orquestador ni de arnés.',
     'No inventes una identidad ni asumas capacidades que no estén registradas.',
+    'Si el pedido requiere ejecución o coordinación, derívalo al operador o al agente correspondiente.',
   ],
 };
 
-/** Persona del agente. Arnés conocido o rol de orquestador explícito; el resto no está autorizado. */
+/** Persona del agente. Arnés, orquestador explícito o genérico registrado (sin tools elevadas). */
 export function buildAgentPersona(input: { agentKey: string; role?: string | null; meta?: unknown }): AgentPersona {
   const harnessType = resolveHarnessType(input);
   if (harnessType) {
@@ -161,7 +169,7 @@ export function buildAgentPersona(input: { agentKey: string; role?: string | nul
     return { ...ORCHESTRATOR_PERSONA, boundaries: [...ORCHESTRATOR_PERSONA.boundaries] };
   }
 
-  return { ...UNKNOWN_PERSONA, boundaries: [...UNKNOWN_PERSONA.boundaries] };
+  return { ...GENERIC_PERSONA, boundaries: [...GENERIC_PERSONA.boundaries] };
 }
 
 export type ResolvedAgentIdentity = {
