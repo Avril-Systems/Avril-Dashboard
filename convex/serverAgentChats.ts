@@ -261,6 +261,9 @@ export const createAgentToolProposalServer = mutation({
     }
 
     const session = requireEntity(await ctx.db.get(chat.orchestrationSessionId), 'Orchestration session');
+    if (chat.organizationId && chat.organizationId !== session.organizationId) {
+      throw new Error('El chat no pertenece a la organización de la sesión.');
+    }
     const agent = await ctx.db
       .query('orchestrationAgents')
       .withIndex('by_session_agentKey', (q) =>
@@ -324,7 +327,11 @@ export const claimAgentToolProposalServer = mutation({
     }
 
     const chat = requireEntity(await ctx.db.get(proposal.chatId), 'Chat');
-    if (chat.kind !== 'agent' || chat.orchestrationSessionId !== proposal.sessionId) {
+    if (
+      chat.kind !== 'agent' ||
+      chat.orchestrationSessionId !== proposal.sessionId ||
+      (chat.organizationId && chat.organizationId !== proposal.organizationId)
+    ) {
       return { ok: false as const, reason: 'mismatch' as const, status: proposal.status };
     }
 
@@ -410,9 +417,42 @@ export const cancelAgentToolProposalServer = mutation({
       return { ok: false as const, reason: 'mismatch' as const, status: proposal.status };
     }
 
+    const now = Date.now();
+    if (proposal.expiresAt <= now) {
+      await ctx.db.patch(proposal._id, {
+        status: 'expired',
+        finishedAt: new Date(now).toISOString(),
+      });
+      return { ok: false as const, reason: 'expired' as const, status: 'expired' as const };
+    }
+
+    const chat = requireEntity(await ctx.db.get(proposal.chatId), 'Chat');
+    if (
+      chat.kind !== 'agent' ||
+      chat.orchestrationSessionId !== proposal.sessionId ||
+      (chat.organizationId && chat.organizationId !== proposal.organizationId)
+    ) {
+      return { ok: false as const, reason: 'mismatch' as const, status: proposal.status };
+    }
+
+    const session = requireEntity(await ctx.db.get(proposal.sessionId), 'Orchestration session');
+    if (session.organizationId !== proposal.organizationId) {
+      return { ok: false as const, reason: 'mismatch' as const, status: proposal.status };
+    }
+
+    const agent = await ctx.db
+      .query('orchestrationAgents')
+      .withIndex('by_session_agentKey', (q) =>
+        q.eq('sessionId', proposal.sessionId).eq('agentKey', proposal.agentKey)
+      )
+      .first();
+    if (!agent) {
+      return { ok: false as const, reason: 'mismatch' as const, status: proposal.status };
+    }
+
     await ctx.db.patch(proposal._id, {
       status: 'cancelled',
-      finishedAt: new Date().toISOString(),
+      finishedAt: new Date(now).toISOString(),
     });
     return { ok: true as const, status: 'cancelled' as const };
   },

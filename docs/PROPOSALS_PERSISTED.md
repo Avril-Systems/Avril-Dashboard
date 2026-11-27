@@ -68,3 +68,27 @@ recargar) y confirma/cancela por `proposalId`.
 
 `typecheck` limpio, `agents:check` 38/38, `lint` solo warnings preexistentes.
 Sin despliegue a producción (solo Convex dev y rama local).
+
+## Hardening posterior (revisión del punto 2)
+
+- `create`: además de chat agente/sesión/agente, verifica que `chat.organizationId` coincida
+  con la organización de la sesión antes de persistir.
+- `claim`: verifica también `chat.organizationId === proposal.organizationId` (además de
+  sesión, agente, chat y organización de la sesión).
+- `cancel`: aplica las mismas comprobaciones (chat, sesión, organización, agente) y, si la
+  propuesta ya expiró, la marca `expired` en vez de cancelarla.
+- Sin cambios de arquitectura ni permisos nuevos: se sigue usando `requireDashboardToken`.
+
+### Evidencia de la revisión (dev)
+
+| Prueba | Resultado |
+|---|---|
+| Confirmar una propuesta nueva | `executed`; actividades 22 → 23 |
+| Confirmar la misma otra vez | **409 PROPOSAL_NOT_PENDING**; 23 |
+| Confirmar con otro agente | **403 PROPOSAL_MISMATCH**; 23 |
+| Confirmar con otra sesión | **403 PROPOSAL_MISMATCH**; 23 |
+| Cancelar y confirmar | cancel ok; **409**; 23 |
+| Confirmar sin auth | **401 UNAUTHORIZED** |
+| Propuestas en Convex | 2 `executed` con `result` (activityId/runId), 6 `cancelled`, 0 pendientes |
+
+Los `executed` guardan `result` con `activityId` y `runId`; los `cancelled` no tienen resultado.
