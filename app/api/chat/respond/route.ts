@@ -64,6 +64,12 @@ const BRIDGE_CONTEXT_LAST_N_WHEN_SUMMARY = 10;
 const BRIDGE_CONTEXT_MAX_CONTENT_CHARS = 600;
 /** Suggested max total context size (chars) for the bridge; bridge may truncate further. */
 const BRIDGE_CONTEXT_MAX_CHARS = 12_000;
+/** Agent loop (solo orquestador, proveedores de texto): topes duros. */
+const AGENT_LOOP_MAX_STEPS = 4;
+const AGENT_LOOP_MAX_READS = 3;
+const AGENT_LOOP_MAX_DIRECT_WRITES = 1;
+const AGENT_LOOP_MAX_MS = 60_000;
+const AGENT_LOOP_MAX_OBSERVATION_CHARS = 16_000;
 /** Short chat turns (intake, commands). */
 const MAX_CHAT_MESSAGE_CHARS = 4_000;
 /** Folder-card “Agent brief” can be long markdown. */
@@ -150,6 +156,8 @@ type BridgeInput = {
   systemPrompt?: string;
   /** Recordatorio de intenciones vigentes (se inserta tras el historial). */
   intentionReminder?: string;
+  /** Turnos efímeros del agent loop (tool call + observación); no se persisten. */
+  loopMessages?: Array<{ role: 'assistant' | 'user'; content: string }>;
 };
 
 type VeniceResult =
@@ -210,6 +218,7 @@ function buildChatMessages(input: BridgeInput): Array<{ role: 'system' | 'user' 
         ]
       : []),
     { role: 'user', content: augmentForMode(input.mode, input.message) },
+    ...(input.loopMessages ?? []),
   ];
 }
 
@@ -962,11 +971,6 @@ export async function POST(req: Request) {
       });
     }
 
-    /**
-     * Modo agente: texto plano + una tool de lectura opcional (S02a).
-     * El bloque lo valida `parseToolCall`; si el modelo no lo usa, es texto normal.
-     * Arquitecto: parser de siempre (JSON de ignición).
-     */
     const toolCalls: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; error?: string }> = [];
     let pendingProposal: {
       id: string;
@@ -978,111 +982,65 @@ export async function POST(req: Request) {
     let agentFinalText = result.text.trim();
 
     if (mode === 'agent' && agentTools.length > 0) {
-      const parsedCall = parseToolCall(result.text);
+      const harnessScope = agentIdentity?.persona.harnessType ?? null;
+      const toolScope = {
+        authorized: agentIdentity?.persona.authorized ?? false,
+        orchestrator: agentIdentity?.persona.kind === 'orchestrator',
+      };
+      // El loop se limita al orquestador en proveedores de texto. Los arneses y el
+      // bridge conservan el flujo de una tool por turno.
+      const loopEnabled =
+        agentIdentity?.persona.kind === 'orchestrator' && (provider === 'openai' || provider === 'venice');
+      const maxSteps = loopEnabled ? AGENT_LOOP_MAX_STEPS : 1;
+      const loopStartedAt = Date.now();
+      const loopMessages: NonNullable<BridgeInput['loopMessages']> = [];
+      const seenCalls = new Set<string>();
+      let readCount = 0;
+      let directWriteCount = 0;
+      let currentResult = result;
+      let step = 0;
 
-      if (parsedCall.kind === 'call') {
-        const callDef = getAgentTool(parsedCall.call.tool);
-        const harnessScope = agentIdentity?.persona.harnessType ?? null;
-        const toolScope = {
-          authorized: agentIdentity?.persona.authorized ?? false,
-          orchestrator: agentIdentity?.persona.kind === 'orchestrator',
-        };
+      while (true) {
+        step += 1;
+        const parsedCall = parseToolCall(currentResult.text);
 
+        if (parsedCall.kind === 'none') {
+          agentFinalText = stripToolBlocks(currentResult.text);
+          break;
+        }
+        if (parsedCall.kind === 'invalid') {
+          agentFinalText = stripToolBlocks(currentResult.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;
+          break;
+        }
+
+        const call = parsedCall.call;
+        const signature = `${call.tool}:${JSON.stringify(call.args)}`;
+        if (seenCalls.has(signature)) {
+          agentFinalText = 'Detuve el loop: la misma herramienta se repitió con los mismos argumentos sin progreso.';
+          break;
+        }
+        seenCalls.add(signature);
+
+        const callDef = getAgentTool(call.tool);
         if (!callDef || !isToolAllowedForAgent(callDef.name, harnessScope, toolScope)) {
           agentFinalText = 'Esa herramienta no está disponible para este agente.';
-        } else if (callDef.kind === 'write') {
-          if (callDef.direct) {
-            // Escrituras de intención: el mensaje del usuario es la instrucción; se aplican en el turno.
-            const outcome = await executeConfirmedAgentTool(parsedCall.call, {
-              sessionId: agentSessionId,
-              harnessType: harnessScope,
-              agentKey: agentAuthorId ?? 'agent',
-            });
-            toolCalls.push({
-              tool: outcome.tool,
-              args: parsedCall.call.args,
-              ok: outcome.ok,
-              ...(outcome.ok ? {} : { error: outcome.error }),
-            });
-            try {
-              await recordAgentToolCall({
-                chatId,
-                sessionId: agentSessionId,
-                agentKey: agentAuthorId ?? 'agent',
-                tool: outcome.tool,
-                args: parsedCall.call.args,
-                ok: outcome.ok,
-                error: outcome.ok ? undefined : outcome.error,
-              });
-            } catch {
-              // La traza no debe romper la respuesta.
-            }
-            agentFinalText = summarizeConfirmedToolOutcome(outcome);
-          } else {
-          const requestedHarness =
-            typeof parsedCall.call.args.harnessType === 'string'
-              ? parsedCall.call.args.harnessType.trim()
-              : '';
-          const requestedActivity =
-            typeof parsedCall.call.args.activity === 'string'
-              ? parsedCall.call.args.activity.trim()
-              : '';
-          const wrongHarness = Boolean(harnessScope && requestedHarness && requestedHarness !== harnessScope);
-          const wrongActivity = Boolean(
-            harnessScope && requestedActivity && !isActivityForHarness(harnessScope, requestedActivity)
-          );
+          break;
+        }
 
-          if (wrongHarness || wrongActivity) {
-            agentFinalText = wrongHarness
-              ? `Solo puedes asignar actividades del arnés \`${harnessScope}\`.`
-              : `La actividad \`${requestedActivity}\` no pertenece al arnés \`${harnessScope}\`.`;
-          } else {
-          // S02b: nunca se ejecuta aquí. Se devuelve una propuesta y el operador confirma en la UI.
-          // En un agente de arnés, el servidor fija su arnés en la propuesta (auditoría/summary).
-          const proposalArgs = harnessScope
-            ? { ...parsedCall.call.args, harnessType: harnessScope }
-            : parsedCall.call.args;
-          const summary = describeToolProposal({ tool: parsedCall.call.tool, args: proposalArgs });
-          let createdProposal: { proposalId: string; expiresAt: number };
-          try {
-            createdProposal = await createAgentToolProposal({
-              chatId,
-              agentKey: agentAuthorId ?? '',
-              tool: parsedCall.call.tool,
-              args: proposalArgs,
-              summary,
-            });
-          } catch (err) {
-            return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
-              retryable: true,
-              details: err instanceof Error ? err.message : String(err),
-            });
+        if (callDef.kind === 'read') {
+          if (readCount >= AGENT_LOOP_MAX_READS) {
+            agentFinalText = 'Detuve el loop: se alcanzó el máximo de lecturas para este turno.';
+            break;
           }
-
-          pendingProposal = {
-            id: createdProposal.proposalId,
-            expiresAt: createdProposal.expiresAt,
-            tool: parsedCall.call.tool,
-            arguments: proposalArgs,
-            summary,
-          };
-          agentFinalText = [
-            `Propongo ejecutar \`${parsedCall.call.tool}\`:`,
-            summary,
-            '',
-            'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
-          ].join('\n');
-          }
-          }
-        } else {
-          const outcome = await executeAgentTool(parsedCall.call, {
+          const outcome = await executeAgentTool(call, {
             sessionId: agentSessionId,
             harnessType: harnessScope,
             agentKey: agentAuthorId ?? 'agent',
           });
+          readCount += 1;
           toolCalls.push({
             tool: outcome.tool,
-            args: parsedCall.call.args,
+            args: call.args,
             ok: outcome.ok,
             ...(outcome.ok ? {} : { error: outcome.error }),
           });
@@ -1094,7 +1052,7 @@ export async function POST(req: Request) {
               sessionId: agentSessionId,
               agentKey: agentAuthorId ?? 'agent',
               tool: outcome.tool,
-              args: parsedCall.call.args,
+              args: call.args,
               ok: outcome.ok,
               error: outcome.ok ? undefined : outcome.error,
               runId: typeof data?.runId === 'string' ? data.runId : undefined,
@@ -1104,47 +1062,173 @@ export async function POST(req: Request) {
             // La traza no debe romper la respuesta.
           }
 
-          // Resultado real bajo demanda: se lo damos al modelo para que lo interprete
-          // (una sola continuación, sin ciclos). Las demás lecturas siguen deterministas.
-          if (parsedCall.call.tool === 'get_activity_result' && outcome.ok) {
+          let observation: string;
+          if (call.tool === 'get_activity_result' && outcome.ok) {
             const resultJson = JSON.stringify(outcome.data, null, 2);
-            const capped =
-              resultJson.length > 16000
-                ? `${resultJson.slice(0, 16000)}\n…(resultado truncado)`
+            observation =
+              resultJson.length > AGENT_LOOP_MAX_OBSERVATION_CHARS
+                ? `${resultJson.slice(0, AGENT_LOOP_MAX_OBSERVATION_CHARS)}\n…(resultado truncado)`
                 : resultJson;
-            const nowIso = new Date().toISOString();
-            const followUpInput: BridgeInput = {
-              ...input,
-              summary: undefined,
-              messages: [
-                { authorType: 'human', authorId: 'user', content: message, createdAt: nowIso },
-                {
-                  authorType: 'agent',
-                  authorId: agentAuthorId ?? 'agent',
-                  content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
-                  createdAt: nowIso,
-                },
-              ],
-              message: [
-                `[Resultado real de la herramienta ${parsedCall.call.tool}]`,
-                capped,
-                '',
-                'Interpreta este resultado real para el usuario: qué encontró, qué significa y cuál es el siguiente paso. No inventes datos.',
-              ].join('\n'),
-            };
-            const followUp = await callModel(followUpInput);
-            agentFinalText = followUp.ok
-              ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
-              : `${summarizeToolOutcome(outcome)}\n\n(No pude interpretar el resultado con el modelo: ${followUp.message})`;
           } else {
-            // Respuesta determinista para listados/errores; la tool es la fuente de verdad.
-            agentFinalText = summarizeToolOutcome(outcome);
+            observation = summarizeToolOutcome(outcome);
           }
+
+          if (!loopEnabled) {
+            // Conserva el comportamiento previo de una tool por turno para arneses/bridge.
+            if (call.tool === 'get_activity_result' && outcome.ok) {
+              const nowIso = new Date().toISOString();
+              const followUp = await callModel({
+                ...input,
+                summary: undefined,
+                messages: [
+                  { authorType: 'human', authorId: 'user', content: message, createdAt: nowIso },
+                  {
+                    authorType: 'agent',
+                    authorId: agentAuthorId ?? 'agent',
+                    content: stripToolBlocks(currentResult.text) || `[tool:${call.tool}]`,
+                    createdAt: nowIso,
+                  },
+                ],
+                message: [
+                  `[Resultado real de la herramienta ${call.tool}]`,
+                  observation,
+                  '',
+                  'Interpreta este resultado real para el usuario: qué encontró, qué significa y cuál es el siguiente paso. No inventes datos.',
+                ].join('\n'),
+              });
+              agentFinalText = followUp.ok
+                ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
+                : `${summarizeToolOutcome(outcome)}\n\n(No pude interpretar el resultado con el modelo: ${followUp.message})`;
+            } else {
+              agentFinalText = summarizeToolOutcome(outcome);
+            }
+            break;
+          }
+
+          if (step >= maxSteps || Date.now() - loopStartedAt > AGENT_LOOP_MAX_MS) {
+            agentFinalText = observation;
+            break;
+          }
+
+          loopMessages.push({ role: 'assistant', content: currentResult.text.trim() });
+          loopMessages.push({
+            role: 'user',
+            content: `[Observación de la herramienta ${call.tool}]\n${observation}`,
+          });
+          const next = await callModel({ ...input, loopMessages: [...loopMessages] });
+          if (!next.ok) {
+            agentFinalText = `${observation}\n\nNo pude continuar el loop: ${next.message}`;
+            break;
+          }
+          currentResult = next;
+          continue;
         }
-      } else if (parsedCall.kind === 'invalid') {
-        agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;
-      } else {
-        agentFinalText = stripToolBlocks(result.text);
+
+        if (callDef.direct) {
+          if (directWriteCount >= AGENT_LOOP_MAX_DIRECT_WRITES) {
+            agentFinalText = 'Detuve el loop: se alcanzó el máximo de escrituras directas para este turno.';
+            break;
+          }
+          const outcome = await executeConfirmedAgentTool(call, {
+            sessionId: agentSessionId,
+            harnessType: harnessScope,
+            agentKey: agentAuthorId ?? 'agent',
+          });
+          directWriteCount += 1;
+          toolCalls.push({
+            tool: outcome.tool,
+            args: call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          });
+
+          try {
+            await recordAgentToolCall({
+              chatId,
+              sessionId: agentSessionId,
+              agentKey: agentAuthorId ?? 'agent',
+              tool: outcome.tool,
+              args: call.args,
+              ok: outcome.ok,
+              error: outcome.ok ? undefined : outcome.error,
+            });
+          } catch {
+            // La traza no debe romper la respuesta.
+          }
+
+          const observation = summarizeConfirmedToolOutcome(outcome);
+          if (!outcome.ok || !loopEnabled) {
+            agentFinalText = observation;
+            break;
+          }
+          if (step >= maxSteps || Date.now() - loopStartedAt > AGENT_LOOP_MAX_MS) {
+            agentFinalText = observation;
+            break;
+          }
+
+          loopMessages.push({ role: 'assistant', content: currentResult.text.trim() });
+          loopMessages.push({
+            role: 'user',
+            content: `[Observación de la herramienta ${call.tool}]\n${observation}`,
+          });
+          const next = await callModel({ ...input, loopMessages: [...loopMessages] });
+          if (!next.ok) {
+            agentFinalText = `${observation}\n\nNo pude continuar el loop: ${next.message}`;
+            break;
+          }
+          currentResult = next;
+          continue;
+        }
+
+        // Escritura con confirmación: se persiste una propuesta y el loop termina.
+        const requestedHarness =
+          typeof call.args.harnessType === 'string' ? call.args.harnessType.trim() : '';
+        const requestedActivity =
+          typeof call.args.activity === 'string' ? call.args.activity.trim() : '';
+        const wrongHarness = Boolean(harnessScope && requestedHarness && requestedHarness !== harnessScope);
+        const wrongActivity = Boolean(
+          harnessScope && requestedActivity && !isActivityForHarness(harnessScope, requestedActivity)
+        );
+
+        if (wrongHarness || wrongActivity) {
+          agentFinalText = wrongHarness
+            ? `Solo puedes asignar actividades del arnés \`${harnessScope}\`.`
+            : `La actividad \`${requestedActivity}\` no pertenece al arnés \`${harnessScope}\`.`;
+          break;
+        }
+
+        const proposalArgs = harnessScope ? { ...call.args, harnessType: harnessScope } : call.args;
+        const summary = describeToolProposal({ tool: call.tool, args: proposalArgs });
+        let createdProposal: { proposalId: string; expiresAt: number };
+        try {
+          createdProposal = await createAgentToolProposal({
+            chatId,
+            agentKey: agentAuthorId ?? '',
+            tool: call.tool,
+            args: proposalArgs,
+            summary,
+          });
+        } catch (err) {
+          return errorResponse(502, 'CONVEX_ERROR', 'No se pudo persistir la propuesta.', {
+            retryable: true,
+            details: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        pendingProposal = {
+          id: createdProposal.proposalId,
+          expiresAt: createdProposal.expiresAt,
+          tool: call.tool,
+          arguments: proposalArgs,
+          summary,
+        };
+        agentFinalText = [
+          `Propongo ejecutar \`${call.tool}\`:`,
+          summary,
+          '',
+          'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
+        ].join('\n');
+        break;
       }
     }
 

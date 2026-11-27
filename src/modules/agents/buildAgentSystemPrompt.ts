@@ -8,7 +8,7 @@
  *
  * Mismo texto para Venice y para el bridge/OpenClaw: se pasa como `systemPrompt`.
  */
-import { HARNESS_CATALOG, isHarnessType } from '@/convex/lib/harnessActivities';
+import { HARNESS_CATALOG, HARNESS_TYPES, isHarnessType } from '@/convex/lib/harnessActivities';
 import type { ResolvedAgentIdentity } from './agentPersonas';
 import type { AgentToolDef } from './toolCatalog';
 import { buildToolInstructions } from './toolProtocol';
@@ -107,6 +107,27 @@ export function buildAgentSystemPrompt(identity: ResolvedAgentIdentity, context:
                     : 'Sin definir.',
                 ]
               : ['', 'No tienes intención particular ni rol de orquestador.']),
+        ]
+      : []),
+    ...(persona.kind === 'orchestrator'
+      ? [
+          '',
+          'Actividades asignables por arnés (usa la clave exacta en assign_activity):',
+          ...HARNESS_TYPES.map((harness) => {
+            const activities = HARNESS_CATALOG[harness].activities
+              .map((activity) => {
+                const fields = activity.inputFields
+                  .map((field) => {
+                    const bits = [field.type, field.required ? 'obligatorio' : 'opcional'];
+                    if (field.defaultValue !== undefined) bits.push(`default ${JSON.stringify(field.defaultValue)}`);
+                    return `${field.key} (${bits.join(', ')})`;
+                  })
+                  .join('; ');
+                return `${activity.key} — ${activity.label}${fields ? ` · input: ${fields}` : ' · sin input'}`;
+              })
+              .join(' || ');
+            return `- ${harness}: ${activities}`;
+          }),
         ]
       : []),
     ...(context.tools && context.tools.length
