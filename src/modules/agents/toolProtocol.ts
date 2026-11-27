@@ -81,29 +81,77 @@ function renderArgs(def: AgentToolDef): string {
     .join('; ');
 }
 
+/** Resumen determinista de una propuesta de escritura (se muestra antes de confirmar). */
+export function describeToolProposal(call: ToolCall): string {
+  const args = call.args;
+
+  switch (call.tool) {
+    case 'assign_activity': {
+      const harness = typeof args.harnessType === 'string' ? args.harnessType : '?';
+      const activity = typeof args.activity === 'string' ? args.activity : '?';
+      const title = typeof args.title === 'string' && args.title.trim() ? ` · título: ${args.title.trim()}` : '';
+      const input =
+        args.input !== undefined ? `\n- Input: ${JSON.stringify(args.input).slice(0, 800)}` : '\n- Input: (defaults del catálogo)';
+      return `Asignar la actividad \`${activity}\` al arnés \`${harness}\`${title}.${input}`;
+    }
+    case 'request_control': {
+      const runId = typeof args.runId === 'string' ? args.runId : '?';
+      const agentKey = typeof args.agentKey === 'string' ? args.agentKey : '?';
+      const command = args.command === 'kill' ? 'STOP (kill)' : 'PAUSE';
+      return `Solicitar ${command} para \`${agentKey}\` en el run \`${runId}\` (solicitud; no es confirmación).`;
+    }
+    default:
+      return `Ejecutar \`${call.tool}\` con args ${JSON.stringify(args).slice(0, 500)}.`;
+  }
+}
+
 /** Sección del system prompt con las tools disponibles y el formato exacto. */
 export function buildToolInstructions(tools: AgentToolDef[]): string {
   if (!tools.length) return '';
-  const list = tools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n');
+
+  const readTools = tools.filter((tool) => tool.kind === 'read');
+  const writeTools = tools.filter((tool) => tool.kind === 'write');
+  const exampleTool = readTools[0] ?? writeTools[0];
   const example = [
     '```tool',
-    `{"tool":"${tools[0].name}","arguments":{}}`,
+    `{"tool":"${exampleTool.name}","arguments":{}}`,
     '```',
   ].join('\n');
 
-  return [
-    'Herramientas de LECTURA disponibles (datos reales; no inventes su resultado):',
-    list,
+  const sections = [
+    'Herramientas disponibles (datos y acciones reales; no inventes resultados):',
+  ];
+
+  if (readTools.length) {
+    sections.push(
+      '',
+      'LECTURA (se ejecutan en tu turno):',
+      readTools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n')
+    );
+  }
+
+  if (writeTools.length) {
+    sections.push(
+      '',
+      'ESCRITURA (requieren confirmación explícita del operador; el servidor NO las ejecuta en tu turno):',
+      writeTools.map((tool) => `- ${tool.name}(${renderArgs(tool)}) — ${tool.description}`).join('\n')
+    );
+  }
+
+  sections.push(
     '',
     'Cómo usarlas:',
     '- Si el usuario pide estado/datos reales, responde SOLO con un bloque de herramienta, sin texto antes ni después.',
-    `Formato exacto (una herramienta por turno):`,
+    'Formato exacto (una herramienta por turno):',
     example,
     '- Usa exactamente los nombres y argumentos listados. El servidor valida el bloque; si falta un argumento, no se ejecuta.',
-    '- El servidor ejecutará la herramienta y te devolverá el resultado real; después responderás al usuario en lenguaje natural.',
+    '- Las de LECTURA se ejecutan y te devuelven el dato real; después responderás al usuario en lenguaje natural.',
+    '- Las de ESCRITURA NO se ejecutan: el servidor devuelve una propuesta y el operador la confirma en la UI. Nunca digas que ya se ejecutó.',
     '- Nunca inventes cifras, estados, runIds ni resultados. Si la herramienta falla, dilo tal cual.',
-    '- Estas herramientas son de lectura: no asignan actividades ni pausan/detienen agentes.',
-  ].join('\n');
+    '- Para acciones destructivas (kill/stop) o que crean runs, explica qué hará la propuesta y deja que el operador confirme.'
+  );
+
+  return sections.join('\n');
 }
 
 export function allAgentTools(): AgentToolDef[] {

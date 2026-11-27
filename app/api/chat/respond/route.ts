@@ -20,10 +20,15 @@ import {
 } from '@/src/modules/agents/buildAgentSystemPrompt';
 import { resolveAgentIdentity } from '@/src/modules/agents/agentPersonas';
 import type { ResolvedAgentIdentity } from '@/src/modules/agents/agentPersonas';
-import { AGENT_TOOLS } from '@/src/modules/agents/toolCatalog';
+import { AGENT_TOOLS, getAgentTool } from '@/src/modules/agents/toolCatalog';
 import type { AgentToolDef } from '@/src/modules/agents/toolCatalog';
-import { parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
-import { executeAgentTool, summarizeToolOutcome } from '@/src/modules/agents/executeAgentTool';
+import { describeToolProposal, parseToolCall, stripToolBlocks } from '@/src/modules/agents/toolProtocol';
+import {
+  executeAgentTool,
+  executeConfirmedAgentTool,
+  summarizeConfirmedToolOutcome,
+  summarizeToolOutcome,
+} from '@/src/modules/agents/executeAgentTool';
 import type { AgentToolOutcome } from '@/src/modules/agents/executeAgentTool';
 import type { ToolCall } from '@/src/modules/agents/toolProtocol';
 import { parseAvrilAssistantReply } from '@/src/modules/avril/parseAvrilAssistantReply';
@@ -54,6 +59,8 @@ type RequestBody = {
   organizationId?: string;
   /** `mock` solo existe en modo agente y solo fuera de producción (pruebas de plumbing). */
   model?: 'codex' | 'opus' | 'venice' | 'mock';
+  /** Confirmación explícita de una tool de escritura propuesta antes (S02b). */
+  confirmTool?: { tool?: string; arguments?: Record<string, unknown> };
 };
 
 type PromptMode = 'architect' | 'agent';
@@ -425,6 +432,84 @@ export async function POST(req: Request) {
     const agentSessionId = agentTarget?.sessionId ?? '';
     const message = body.message?.trim();
 
+    /**
+     * S02b: confirmación explícita de una tool de ESCRITURA propuesta antes.
+     * No llama al modelo: valida de nuevo y ejecuta la acción real una sola vez.
+     */
+    const confirmToolRaw = body.confirmTool;
+    if (confirmToolRaw !== undefined) {
+      if (!agentTarget) {
+        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere sessionId + agentKey.');
+      }
+
+      const toolName = typeof confirmToolRaw?.tool === 'string' ? confirmToolRaw.tool.trim() : '';
+      const rawArgs = confirmToolRaw?.arguments;
+      if (
+        !toolName ||
+        (rawArgs !== undefined &&
+          (rawArgs === null || typeof rawArgs !== 'object' || Array.isArray(rawArgs)))
+      ) {
+        return errorResponse(400, 'BAD_REQUEST', 'confirmTool requiere { tool, arguments? }.');
+      }
+
+      const def = getAgentTool(toolName);
+      if (!def || def.kind !== 'write') {
+        return errorResponse(400, 'BAD_REQUEST', 'Solo se pueden confirmar tools de escritura.');
+      }
+
+      let resolvedConfirm: Awaited<ReturnType<typeof getOrCreateAgentChat>>;
+      try {
+        resolvedConfirm = await getOrCreateAgentChat(agentTarget);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const notFound = /unknown agent/i.test(detail);
+        return errorResponse(
+          notFound ? 404 : 502,
+          notFound ? 'AGENT_NOT_FOUND' : 'AGENT_CHAT_FAILED',
+          notFound ? 'Unknown agent for this session.' : 'Failed to resolve the agent conversation.',
+          { retryable: !notFound, details: detail }
+        );
+      }
+
+      const call: ToolCall = { tool: def.name, args: (rawArgs ?? {}) as Record<string, unknown> };
+      const outcome = await executeConfirmedAgentTool(call);
+      const reply = summarizeConfirmedToolOutcome(outcome);
+
+      let warning: string | undefined;
+      try {
+        await sendMessage({
+          chatId: resolvedConfirm.chatId,
+          content: `Confirmo: ${describeToolProposal(call)}`,
+        });
+        await sendAgentMessage({
+          chatId: resolvedConfirm.chatId,
+          content: reply,
+          authorId: resolvedConfirm.agent.agentKey,
+        });
+      } catch (err) {
+        warning = `La acción se procesó, pero no se pudo persistir el mensaje: ${
+          err instanceof Error ? err.message : String(err)
+        }`;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode: 'agent',
+        chatId: resolvedConfirm.chatId,
+        agentKey: resolvedConfirm.agent.agentKey,
+        reply,
+        toolCalls: [
+          {
+            tool: outcome.tool,
+            args: call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          },
+        ],
+        ...(warning ? { warning } : {}),
+      });
+    }
+
     if ((!chatIdFromBody && !agentTarget) || !message) {
       return errorResponse(
         400,
@@ -611,38 +696,57 @@ export async function POST(req: Request) {
      * Arquitecto: parser de siempre (JSON de ignición).
      */
     const toolCalls: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; error?: string }> = [];
+    let pendingProposal: { tool: string; arguments: Record<string, unknown>; summary: string } | null = null;
     let agentFinalText = result.text.trim();
 
     if (mode === 'agent' && agentTools.length > 0) {
       const parsedCall = parseToolCall(result.text);
 
       if (parsedCall.kind === 'call') {
-        const outcome = await executeAgentTool(parsedCall.call, { sessionId: agentSessionId });
-        toolCalls.push({
-          tool: outcome.tool,
-          args: parsedCall.call.args,
-          ok: outcome.ok,
-          ...(outcome.ok ? {} : { error: outcome.error }),
-        });
+        const callDef = getAgentTool(parsedCall.call.tool);
 
-        const followUpInput: BridgeInput = {
-          ...input,
-          messages: [
-            ...(input.messages ?? []),
-            {
-              authorType: 'agent',
-              authorId: agentAuthorId ?? 'agent',
-              content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          message: buildToolResultMessage(parsedCall.call, outcome),
-        };
+        if (callDef?.kind === 'write') {
+          // S02b: nunca se ejecuta aquí. Se devuelve una propuesta y el operador confirma en la UI.
+          const summary = describeToolProposal(parsedCall.call);
+          pendingProposal = {
+            tool: parsedCall.call.tool,
+            arguments: parsedCall.call.args,
+            summary,
+          };
+          agentFinalText = [
+            `Propongo ejecutar \`${parsedCall.call.tool}\`:`,
+            summary,
+            '',
+            'No se ha ejecutado nada. Usa “Confirmar” para ejecutarlo o “Cancelar” para descartarlo.',
+          ].join('\n');
+        } else {
+          const outcome = await executeAgentTool(parsedCall.call, { sessionId: agentSessionId });
+          toolCalls.push({
+            tool: outcome.tool,
+            args: parsedCall.call.args,
+            ok: outcome.ok,
+            ...(outcome.ok ? {} : { error: outcome.error }),
+          });
 
-        const followUp = await callModel(followUpInput);
-        agentFinalText = followUp.ok
-          ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
-          : `${summarizeToolOutcome(outcome)}\n\n(No pude redactar el resumen con el modelo: ${followUp.message})`;
+          const followUpInput: BridgeInput = {
+            ...input,
+            messages: [
+              ...(input.messages ?? []),
+              {
+                authorType: 'agent',
+                authorId: agentAuthorId ?? 'agent',
+                content: stripToolBlocks(result.text) || `[tool:${parsedCall.call.tool}]`,
+                createdAt: new Date().toISOString(),
+              },
+            ],
+            message: buildToolResultMessage(parsedCall.call, outcome),
+          };
+
+          const followUp = await callModel(followUpInput);
+          agentFinalText = followUp.ok
+            ? stripToolBlocks(followUp.text) || summarizeToolOutcome(outcome)
+            : `${summarizeToolOutcome(outcome)}\n\n(No pude redactar el resumen con el modelo: ${followUp.message})`;
+        }
       } else if (parsedCall.kind === 'invalid') {
         agentFinalText = stripToolBlocks(result.text) || `No pude ejecutar la herramienta: ${parsedCall.error}`;
       } else {
@@ -766,6 +870,7 @@ export async function POST(req: Request) {
       chatId,
       ...(agentAuthorId ? { agentKey: agentAuthorId } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
+      ...(pendingProposal ? { requiresConfirmation: true, proposal: pendingProposal } : {}),
       reply: displayText,
       ...(mode === 'architect' && architectPayload !== null ? { architectPayload } : {}),
       ...(ignitionReady ? { ignitionReady: true } : {}),

@@ -38,6 +38,8 @@ type ServerMessage = {
 
 type PendingMessage = { content: string; at: number };
 
+type ToolProposal = { tool: string; arguments: Record<string, unknown>; summary: string };
+
 type ModelChoice = 'venice' | 'codex' | 'opus' | 'mock';
 
 const DASHBOARD_TOKEN = process.env.NEXT_PUBLIC_DASHBOARD_APP_TOKEN ?? '';
@@ -63,6 +65,8 @@ export default function OfficeAgentChat({
   const [sending, setSending] = useState(false);
   const [model, setModel] = useState<ModelChoice>('venice');
   const [pending, setPending] = useState<PendingMessage | null>(null);
+  /** Propuesta de acción real pendiente de confirmación (S02b). */
+  const [proposal, setProposal] = useState<ToolProposal | null>(null);
   /** Tool de lectura usada en el último turno (señal visual; no se persiste en S02a). */
   const [toolNote, setToolNote] = useState<string | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
@@ -141,6 +145,7 @@ export default function OfficeAgentChat({
     setError(null);
     setPending(null);
     setToolNote(null);
+    setProposal(null);
     if (!activeAgentKey) return;
 
     setLoading(true);
@@ -178,6 +183,7 @@ export default function OfficeAgentChat({
     setSending(true);
     setError(null);
     setToolNote(null);
+    setProposal(null);
     setPending({ content: text, at: startedAt });
 
     try {
@@ -200,6 +206,17 @@ export default function OfficeAgentChat({
       }
       if (typeof data.chatId === 'string') setChatId(data.chatId);
 
+      const rawProposal = data?.proposal;
+      if (data?.requiresConfirmation === true && rawProposal && typeof rawProposal.tool === 'string') {
+        setProposal({
+          tool: rawProposal.tool,
+          arguments: (rawProposal.arguments ?? {}) as Record<string, unknown>,
+          summary: typeof rawProposal.summary === 'string' ? rawProposal.summary : '',
+        });
+      } else {
+        setProposal(null);
+      }
+
       const calls = Array.isArray(data?.toolCalls)
         ? (data.toolCalls as Array<{ tool?: string; ok?: boolean }>)
         : [];
@@ -219,6 +236,43 @@ export default function OfficeAgentChat({
       inputRef.current?.focus();
     }
   }, [input, activeAgent, sessionId, sending, authHeaders, load, model]);
+
+  const confirmProposal = useCallback(async () => {
+    if (!proposal || !activeAgent || !sessionId || sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/chat/respond', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          sessionId,
+          agentKey: activeAgent.agentKey,
+          confirmTool: { tool: proposal.tool, arguments: proposal.arguments },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        setError(data?.error?.message ?? `No se pudo ejecutar la acción (HTTP ${res.status}).`);
+        return;
+      }
+      setProposal(null);
+      setToolNote(`Acción ejecutada: ${proposal.tool}`);
+      if (typeof data?.warning === 'string' && data.warning) setError(data.warning);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo ejecutar la acción.');
+    } finally {
+      setSending(false);
+      void load();
+      inputRef.current?.focus();
+    }
+  }, [proposal, activeAgent, sessionId, sending, authHeaders, load]);
+
+  const cancelProposal = useCallback(() => {
+    setProposal(null);
+    setToolNote(null);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -379,6 +433,33 @@ export default function OfficeAgentChat({
           </div>
         )}
       </div>
+
+      {proposal && (
+        <div className="space-y-1.5 border-t border-amber-500/30 bg-amber-500/10 px-4 py-2">
+          <p className="font-heading text-[10px] uppercase tracking-wide text-amber-200">
+            Acción pendiente de confirmación
+          </p>
+          <p className="whitespace-pre-wrap text-[11px] text-amber-100/90">{proposal.summary || proposal.tool}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void confirmProposal()}
+              disabled={sending}
+              className="rounded-full border border-amber-400/50 bg-amber-400/20 px-3 py-1 font-heading text-[11px] text-amber-100 transition-colors hover:bg-amber-400/30 disabled:opacity-50"
+            >
+              Confirmar
+            </button>
+            <button
+              type="button"
+              onClick={cancelProposal}
+              disabled={sending}
+              className="rounded-full border border-border/60 bg-background/40 px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="border-t border-border/60 px-4 py-3">

@@ -11,11 +11,14 @@
  */
 import { isHarnessType } from '@/convex/lib/harnessActivities';
 import { listOrchestrationAgents } from '@/src/lib/convexServer';
+import { HarnessInputError, normalizeActivityInput } from '@/src/lib/harnessInput';
 import {
+  assignHarnessActivity,
   getHarnessConnections,
   getRunEvents,
   isSafeId,
   listTenantActivities,
+  sendRunCommand,
   SwarmyConfigError,
 } from '@/src/lib/swarmyServer';
 import type { HarnessActivityRow } from '@/src/lib/swarmyServer';
@@ -161,7 +164,7 @@ async function listAgents(sessionId: string) {
   return { sessionId, count: agents.length, agents };
 }
 
-/** Ejecuta una tool ya validada por `parseToolCall`. */
+/** Ejecuta una tool de LECTURA ya validada por `parseToolCall`. Las de escritura se rechazan. */
 export async function executeAgentTool(
   call: ToolCall,
   context: { sessionId: string }
@@ -169,6 +172,13 @@ export async function executeAgentTool(
   const def = getAgentTool(call.tool);
   if (!def) {
     return { tool: String(call.tool), ok: false, error: `Herramienta desconocida: ${String(call.tool)}.` };
+  }
+  if (def.kind !== 'read') {
+    return {
+      tool: call.tool,
+      ok: false,
+      error: `La herramienta ${call.tool} requiere confirmación explícita del operador.`,
+    };
   }
 
   try {
@@ -225,5 +235,106 @@ export function summarizeToolOutcome(outcome: AgentToolOutcome): string {
       return `Agentes en la sesión: ${data.count}.`;
     default:
       return JSON.stringify(data).slice(0, 1200);
+  }
+}
+
+/**
+ * Ejecuta una tool de ESCRITURA ya confirmada por el operador (`confirmTool`).
+ * El servidor revalida arnés/actividad/args: la confirmación de UI no exime de validar.
+ */
+export async function executeConfirmedAgentTool(call: ToolCall): Promise<AgentToolOutcome> {
+  const def = getAgentTool(call.tool);
+  if (!def) {
+    return { tool: String(call.tool), ok: false, error: `Herramienta desconocida: ${String(call.tool)}.` };
+  }
+  if (def.kind !== 'write') {
+    return { tool: call.tool, ok: false, error: `La herramienta ${call.tool} es de lectura y no requiere confirmación.` };
+  }
+
+  try {
+    switch (call.tool) {
+      case 'assign_activity': {
+        const harnessType = asString(call.args.harnessType, 40);
+        const activity = asString(call.args.activity, 80);
+        const title = asString(call.args.title, 120);
+        const normalized = normalizeActivityInput(harnessType, activity, call.args.input ?? {});
+        const assigned = await assignHarnessActivity({
+          harnessType: normalized.harnessType,
+          activity: activity as string,
+          title: title || undefined,
+          input: normalized.input,
+          createdBy: 'dashboard:orchestrator',
+        });
+
+        return {
+          tool: call.tool,
+          ok: true,
+          data: {
+            ...assigned,
+            harnessType: normalized.harnessType,
+            activity,
+            title: title ?? null,
+            note: 'En cola: la ejecuta el worker. Todavía no se ha ejecutado.',
+          },
+        };
+      }
+      case 'request_control': {
+        const runId = asString(call.args.runId);
+        const agentKey = asString(call.args.agentKey);
+        const command = call.args.command;
+        if (!isSafeId(runId) || !isSafeId(agentKey)) throw new Error('runId/agentKey inválidos.');
+        if (command !== 'pause' && command !== 'kill') throw new Error('command debe ser pause o kill.');
+
+        const result = await sendRunCommand({ runId, agentKey, command });
+        return {
+          tool: call.tool,
+          ok: true,
+          data: {
+            ...result,
+            runId,
+            agentKey,
+            command,
+            note: 'Solicitud registrada; NO confirmada hasta que llegue agent.paused/agent.stopped.',
+          },
+        };
+      }
+      default:
+        return { tool: call.tool, ok: false, error: 'Herramienta de escritura no implementada.' };
+    }
+  } catch (err) {
+    if (err instanceof SwarmyConfigError) {
+      return {
+        tool: call.tool,
+        ok: false,
+        error: `Configuración de Swarmy incompleta: faltan ${err.missing.join(', ')}.`,
+      };
+    }
+    if (err instanceof HarnessInputError) {
+      return { tool: call.tool, ok: false, error: `Input inválido: ${err.message}` };
+    }
+    const message = err instanceof Error ? err.message : 'Error ejecutando la acción.';
+    return { tool: call.tool, ok: false, error: message.slice(0, 500) };
+  }
+}
+
+/** Mensaje determinista tras confirmar una acción (se persiste en el hilo). */
+export function summarizeConfirmedToolOutcome(outcome: AgentToolOutcome): string {
+  if (!outcome.ok) return `No se ejecutó ${outcome.tool}: ${outcome.error}`;
+
+  const data = outcome.data as any;
+  switch (outcome.tool) {
+    case 'assign_activity':
+      return [
+        `Actividad encolada: \`${data.activity}\` en el arnés \`${data.harnessType}\`.`,
+        `activityId \`${data.activityId}\` · runId \`${data.runId}\`.`,
+        'Queda en cola hasta que el worker la reclame (no se ha ejecutado todavía).',
+      ].join(' ');
+    case 'request_control':
+      return [
+        `Solicitud de ${data.command === 'kill' ? 'STOP (kill)' : 'PAUSE'} registrada para \`${data.agentKey}\` en el run \`${data.runId}\`.`,
+        'Es una solicitud: no cuenta como confirmada hasta que llegue `agent.paused` / `agent.stopped`.',
+      ].join(' ');
+    default:
+      return `Ejecutado ${outcome.tool}.`;
   }
 }
